@@ -1,0 +1,133 @@
+import Foundation
+
+// MARK: - InnerTubeClients
+//
+// Single source of truth for YouTube InnerTube client identifiers and versions.
+// Used by InnerTubeAPI (request bodies + headers) and AuthService (TV context body).
+
+package enum InnerTubeClients {
+
+    package enum Web {
+        package static let name      = "WEB"
+        package static let nameID    = "1"
+        package static let version   = "2.20260708.00.00"
+        /// Browser UA used by the YouTube web client.
+        package static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    package enum iOS {
+        package static let name      = "iOS"
+        package static let nameID    = "5"
+        package static let version   = "21.26.4"
+        /// Returns the running iOS version formatted as "MAJOR_MINOR_PATCH" (or "MAJOR_MINOR"
+        /// when the patch is 0). Dynamically derived from ProcessInfo so the User-Agent always
+        /// reflects the actual device OS — prevents YouTube from rejecting requests sent from
+        /// devices running iOS versions newer than the hardcoded string.
+        package static var currentOSVersionString: String {
+            let v = ProcessInfo.processInfo.operatingSystemVersion
+            return v.patchVersion == 0
+                ? "\(v.majorVersion)_\(v.minorVersion)"
+                : "\(v.majorVersion)_\(v.minorVersion)_\(v.patchVersion)"
+        }
+        package static var userAgent: String {
+            "com.google.ios.youtube/\(version) (iPhone16,2; U; CPU iOS \(currentOSVersionString) like Mac OS X;)"
+        }
+    }
+
+    /// Android client — used exclusively for downloads.
+    /// CDN URLs signed by the Android client are reliably downloadable using just
+    /// the Android UA; no session cookies or PO tokens required.
+    /// Exact params from yt-dlp to avoid YouTube bot detection / HTTP 400.
+    package enum Android {
+        package static let name            = "ANDROID"
+        package static let nameID          = "3"
+        package static let version         = "21.26.364"
+        package static let androidSdkVersion = 30  // Android 11
+        package static let userAgent       = "com.google.android.youtube/\(version) (Linux; U; Android 11) gzip"
+    }
+
+    /// Android VR client (Oculus Quest identity) — used as an unauthenticated fallback
+    /// for audio-only mode. Per yt-dlp research (May 2026), this client does not require
+    /// a Proof-of-Origin (PO) token for adaptive streams. Monitor for future enforcement.
+    /// Note: clientVersion must not exceed 1.65 — higher versions return SABR streams only.
+    package enum AndroidVR {
+        package static let name    = "ANDROID_VR"
+        package static let nameID  = "28"
+        package static let version = "1.65.10"
+        // eureka-user build string matches yt-dlp's android_vr UA exactly (May 2026).
+        package static let userAgent = "com.google.android.apps.youtube.vr.oculus/\(version) (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+    }
+
+    /// visionOS client — current yt-dlp's first-choice JS-less client.
+    /// Unlike Android/iOS/WEB, its current upstream policy does not require a GVS
+    /// PO token. It is useful on tvOS because both platforms use Apple media codecs.
+    package enum VisionOS {
+        package static let name      = "VISIONOS"
+        package static let nameID    = "101"
+        package static let version   = "1.02"
+        package static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+        /// Higher HLS tiers are currently VP9/AV1; tvOS AVFoundation needs the
+        /// H.264 ladder, which tops out at 1080p for this client.
+        package static let maximumHLSHeight = 1080
+    }
+
+    /// Web Embedded Player client — the current YouTube iframe embedded player.
+    /// Replaces the deprecated TVHTML5_SIMPLY_EMBEDDED_PLAYER (nameID=85) which was
+    /// removed from yt-dlp in 2026 after YouTube blocked it with "no longer supported".
+    /// Requires `thirdParty.embedUrl` in the request body — yt-dlp's `_fix_embedded_ytcfg`
+    /// injects this automatically; our `fetchPlayerInfoTVEmbedded` sets it explicitly.
+    package enum TVEmbedded {
+        package static let name    = "WEB_EMBEDDED_PLAYER"
+        package static let nameID  = "56"
+        package static let version = "2.20260708.00.00"
+    }
+
+    /// Mobile web client (YouTube m.youtube.com, iPad Safari).
+    /// Per yt-dlp research, MWEB does NOT require a PO Token for HLS streams
+    /// (`required=False, recommended=True`). Unlike WEB_EMBEDDED_PLAYER it has no
+    /// embedding restriction, so it may return `hlsManifestUrl` for videos that
+    /// TVEmbedded cannot serve (embedding disabled). Also returns "ultralow" HLS
+    /// variants for data-saver contexts alongside standard 360p–1080p tiers.
+    package enum MWEB {
+        package static let name      = "MWEB"
+        package static let nameID    = "2"
+        package static let version   = "2.20260708.05.00"
+        package static let userAgent = "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)"
+    }
+
+    /// YouTube Studio (creator) web client. Per yt-dlp research, this client is exempt
+    /// from Proof-of-Origin (rqh=1) CDN enforcement on adaptive streams, unlike the
+    /// standard WEB (1), iOS (5), or Android (3) clients. Its adaptive stream URLs can
+    /// be used in AVMutableComposition without a pot= token.
+    package enum WebCreator {
+        package static let name    = "WEB_CREATOR"
+        package static let nameID  = "62"
+        package static let version = "1.20260708.06.00"
+    }
+
+    /// WEB client with macOS Safari UA — mirrors yt-dlp's `web_safari` client config
+    /// (commit 48a61d0f). YouTube returns `hlsManifestUrl` for this client even for
+    /// non-embeddable videos, while returning only `serverAbrStreamingUrl` (SABR) for
+    /// the Chrome-UA WEB client. HLS manifest CDN URLs (manifest.googlevideo.com) do
+    /// not require a pot= token. The Safari UA is the key differentiator — the same
+    /// client nameID=1 with Chrome UA does not get `hlsManifestUrl`.
+    package enum WebSafari {
+        package static let name      = "WEB"
+        package static let nameID    = "1"
+        package static let version   = "2.20260708.00.00"
+        package static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)"
+    }
+
+    package enum TV {
+        package static let name      = "TVHTML5"
+        package static let nameID    = "7"
+        // Version 7.x (standard Cobalt TV client) — used for browse AND authenticated player.
+        // Tested yt-dlp tv_downgraded 5.20260114 for player: returns HLS=false (same as 7.x),
+        // and 5.x breaks the /browse home-feed endpoint (HTTP 400). No benefit to 5.x here.
+        package static let version   = "7.20260707.07.00"
+        package static let userAgent = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)"
+    }
+
+    /// Maximum number of videos fetched per shelf/related-videos request.
+    package static let maxVideoResults = 20
+}

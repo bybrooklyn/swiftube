@@ -1,0 +1,88 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*~.nib
+*.pbxuser
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/
+*.resolved
+# Keep Package.resolved when using SPM directly:
+# !Package.resolved
+
+# CocoaPods
+Pods/
+*.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Environment / secrets
+*.env
+*.p8
+*.p12
+*.mobileprovision
+AuthKey_*.p8
+
+# Private signing config (copy from SmartTubeIOSPrivate via setup.sh)
+SmartTubeApp/Config/Secrets.xcconfig
+
+# Firebase config (copy from SmartTubeIOSPrivate via setup.sh)
+SmartTubeApp/SmartTubeApp/GoogleService-Info.plist
+
+# Simulator
+*.app
+
+# Misc
+.venv/
+*.log
+notes.txt
+out.txt
+out1.txt
+deps.txt
+logcat.txt
+/releases
+/files
+/misc
+/other
+/TODO.txt
+tmp/
+*_bak*
+*_tmp
+*.bak*
+*.tmp
+*.7z
+.DS_Store
+/captures
+.externalNativeBuild
+fabric.properties
+*BAK.java
+hs_err_pid*.log
+
+# SwiftPM + hand-rolled bundle
+/.build/
+/build/
+
+# Python bytecode from Scripts/
+__pycache__/
+
+# Scratch reference captures
+leanback-*.png
