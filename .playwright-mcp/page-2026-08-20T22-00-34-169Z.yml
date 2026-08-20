@@ -1,4 +1,0 @@
-- alert [ref=e2]:
-  - img "Youtube" [ref=e3]
-  - contentinfo [ref=e4]: You are being directed to youtube.com
-  - contentinfo [ref=e5]: For a better experience, check your device’s app store for the official YouTube app.

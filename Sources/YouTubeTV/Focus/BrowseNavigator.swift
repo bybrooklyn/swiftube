@@ -38,7 +38,7 @@ public enum BrowseNavigator {
             case let .card(shelf, index):
                 indexByShelf[shelf] = index
                 contentFocus = focus
-            case .chip:
+            case .topBar:
                 contentFocus = focus
             case let .rail(item):
                 railItem = item
@@ -69,8 +69,12 @@ public enum BrowseNavigator {
 
         // MARK: Guide rail
         case let .rail(item):
-            let items = RailItem.allCases
-            guard let position = items.firstIndex(of: item) else { return focus }
+            let items = layout.railItems
+            // The focused entry can vanish under us — the channel list arrives
+            // asynchronously and changes on sign-out. Fall back to Home.
+            guard let position = items.firstIndex(of: item) else {
+                return .rail(items.first(where: { $0 == .home }) ?? items.first ?? item)
+            }
             switch direction {
             case .up:
                 return position > 0 ? .rail(items[position - 1]) : focus
@@ -84,15 +88,18 @@ public enum BrowseNavigator {
                 return memory.contentFocus ?? defaultContentFocus(layout: layout)
             }
 
-        // MARK: Category chips
-        case let .chip(index):
+        // MARK: Top bar
+        case let .topBar(item):
             switch direction {
             case .left:
-                // Pressing left on the first chip opens the guide — the same
-                // gesture as pressing left on the first card.
-                return index > 0 ? .chip(index - 1) : .rail(memory.railItem)
+                // Straight to the guide. There is no avatar in the top bar to
+                // land on — the account lives at the top of the guide, and the
+                // bar only reserves that column as blank space. Focusing it made
+                // the highlight vanish and needed a second press to escape.
+                _ = item
+                return .rail(memory.railItem)
             case .right:
-                return .chip(min(index + 1, max(layout.chipCount - 1, 0)))
+                return focus
             case .down:
                 guard let shelf = layout.firstFocusableShelf else { return focus }
                 return .card(shelf: shelf, index: memory.index(forShelf: shelf, layout: layout))
@@ -112,8 +119,8 @@ public enum BrowseNavigator {
                 if let above = previousFocusableShelf(before: shelf, layout: layout) {
                     return .card(shelf: above, index: memory.index(forShelf: above, layout: layout))
                 }
-                // Above the topmost shelf sits the chip row, if there is one.
-                return layout.chipCount > 0 ? .chip(0) : focus
+                // Above the topmost shelf sits the search bar.
+                return layout.hasTopBar ? .topBar(.search) : focus
             case .down:
                 if let below = nextFocusableShelf(after: shelf, layout: layout) {
                     return .card(shelf: below, index: memory.index(forShelf: below, layout: layout))
@@ -126,9 +133,8 @@ public enum BrowseNavigator {
     /// Focus to use when there is no remembered position — the first chip if the
     /// surface has chips, otherwise the first card of the first loaded shelf.
     public static func defaultContentFocus(layout: BrowseLayout) -> BrowseFocus {
-        if layout.chipCount > 0 { return .chip(0) }
         if let shelf = layout.firstFocusableShelf { return .card(shelf: shelf, index: 0) }
-        return .chip(0)
+        return layout.hasTopBar ? .topBar(.search) : .rail(.home)
     }
 
     /// Clamps a focus back into range after the layout changes underneath it —
@@ -138,9 +144,8 @@ public enum BrowseNavigator {
         switch focus {
         case .rail:
             return focus
-        case let .chip(index):
-            guard layout.chipCount > 0 else { return defaultContentFocus(layout: layout) }
-            return .chip(min(index, layout.chipCount - 1))
+        case .topBar:
+            return layout.hasTopBar ? focus : defaultContentFocus(layout: layout)
         case let .card(shelf, index):
             if layout.isFocusable(shelf: shelf) {
                 return .card(shelf: shelf, index: min(index, layout.shelfSizes[shelf] - 1))

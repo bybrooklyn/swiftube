@@ -4,9 +4,9 @@ import Testing
 @Suite("BrowseNavigator")
 struct BrowseNavigatorTests {
 
-    /// Three shelves of 5, 3 and 4 cards, with a chip row above them.
+    /// Three shelves of 5, 3 and 4 cards, beneath a top bar.
     private var layout: BrowseLayout {
-        BrowseLayout(chipCount: 4, shelfSizes: [5, 3, 4])
+        BrowseLayout(shelfSizes: [5, 3, 4])
     }
 
     private func move(
@@ -41,12 +41,14 @@ struct BrowseNavigatorTests {
         #expect(result == .card(shelf: 0, index: 2))
     }
 
-    @Test("left from the first chip opens the guide")
-    func leftFromFirstChipOpensGuide() {
+    @Test("left from the search pill opens the guide in one press")
+    func leftFromSearchOpensGuide() {
         var memory = BrowseNavigator.ColumnMemory()
-        let result = BrowseNavigator.next(from: .chip(0), direction: .left,
-                                          layout: layout, memory: &memory)
-        #expect(result == .rail(.home))
+        // One press, not two. There is no avatar in the top bar to stop on —
+        // the account entry lives in the guide.
+        let rail = BrowseNavigator.next(from: .topBar(.search), direction: .left,
+                                        layout: layout, memory: &memory)
+        #expect(rail == .rail(.home))
     }
 
     @Test("right from the guide returns to whatever was focused when it opened")
@@ -94,28 +96,47 @@ struct BrowseNavigatorTests {
         #expect(focus == .card(shelf: 1, index: 1))
     }
 
-    @Test("up from the top shelf reaches the chip row")
-    func upFromTopShelfReachesChips() {
+    @Test("up from the top shelf reaches the search bar")
+    func upFromTopShelfReachesSearch() {
         var memory = BrowseNavigator.ColumnMemory()
         let result = BrowseNavigator.next(from: .card(shelf: 0, index: 1), direction: .up,
                                           layout: layout, memory: &memory)
-        #expect(result == .chip(0))
+        #expect(result == .topBar(.search))
     }
 
-    @Test("up from the top shelf is a no-op when the surface has no chips")
-    func upFromTopShelfWithoutChipsIsNoOp() {
+    @Test("up from the top shelf is a no-op when there is no top bar")
+    func upFromTopShelfWithoutTopBarIsNoOp() {
         var memory = BrowseNavigator.ColumnMemory()
-        let noChips = BrowseLayout(chipCount: 0, shelfSizes: [5, 3])
+        let bare = BrowseLayout(shelfSizes: [5, 3], hasTopBar: false)
         let result = BrowseNavigator.next(from: .card(shelf: 0, index: 1), direction: .up,
-                                          layout: noChips, memory: &memory)
+                                          layout: bare, memory: &memory)
         #expect(result == .card(shelf: 0, index: 1))
+    }
+
+    @Test("down from the top bar returns to the feed")
+    func downFromTopBarReturnsToFeed() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = BrowseNavigator.next(from: .topBar(.search), direction: .down,
+                                          layout: layout, memory: &memory)
+        #expect(result == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a guide entry that disappears does not strand focus")
+    func vanishingRailEntryFallsBackToHome() {
+        var memory = BrowseNavigator.ColumnMemory()
+        // Focus is on a subscribed channel, then the user signs out and the
+        // channel list empties underneath them.
+        let signedOut = BrowseLayout(railItems: RailItem.fixed, shelfSizes: [5, 3, 4])
+        let result = BrowseNavigator.next(from: .rail(.channel("UC-gone")), direction: .down,
+                                          layout: signedOut, memory: &memory)
+        #expect(result == .rail(.home))
     }
 
     @Test("vertical movement skips shelves that have not loaded yet")
     func verticalMovementSkipsEmptyShelves() {
         var memory = BrowseNavigator.ColumnMemory()
         // Shelf 1 is still loading (zero items) and must not swallow focus.
-        let loading = BrowseLayout(chipCount: 0, shelfSizes: [3, 0, 4])
+        let loading = BrowseLayout(shelfSizes: [3, 0, 4])
         let down = BrowseNavigator.next(from: .card(shelf: 0, index: 0), direction: .down,
                                         layout: loading, memory: &memory)
         #expect(down == .card(shelf: 2, index: 0))
@@ -142,8 +163,8 @@ struct BrowseNavigatorTests {
         #expect(result == .card(shelf: 2, index: 0))
     }
 
-    @Test("guide rail movement stops at both ends")
-    func guideRailStopsAtEnds() {
+    @Test("guide movement stops at both ends")
+    func guideStopsAtEnds() {
         var memory = BrowseNavigator.ColumnMemory()
         let top = BrowseNavigator.next(from: .rail(.account), direction: .up,
                                        layout: layout, memory: &memory)
@@ -152,6 +173,18 @@ struct BrowseNavigatorTests {
         let bottom = BrowseNavigator.next(from: .rail(.settings), direction: .down,
                                           layout: layout, memory: &memory)
         #expect(bottom == .rail(.settings))
+    }
+
+    @Test("subscribed channels are reachable in the guide")
+    func channelsAreReachable() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let withChannels = BrowseLayout(
+            railItems: [.account, .search, .home, .channel("UC-a"), .channel("UC-b"),
+                        .subscriptions, .settings],
+            shelfSizes: [5, 3, 4])
+        let down = BrowseNavigator.next(from: .rail(.home), direction: .down,
+                                        layout: withChannels, memory: &memory)
+        #expect(down == .rail(.channel("UC-a")))
     }
 
     @Test("the guide reopens on the item it was last left on")
@@ -171,21 +204,21 @@ struct BrowseNavigatorTests {
 
     @Test("focus is clamped back into range when a shelf shrinks")
     func focusClampsWhenShelfShrinks() {
-        let shrunk = BrowseLayout(chipCount: 4, shelfSizes: [2, 3, 4])
+        let shrunk = BrowseLayout(shelfSizes: [2, 3, 4])
         let result = BrowseNavigator.clamped(.card(shelf: 0, index: 4), to: shrunk)
         #expect(result == .card(shelf: 0, index: 1))
     }
 
     @Test("focus moves to a neighbouring shelf when its own shelf empties")
     func focusMovesWhenShelfEmpties() {
-        let emptied = BrowseLayout(chipCount: 0, shelfSizes: [0, 3])
+        let emptied = BrowseLayout(shelfSizes: [0, 3])
         let result = BrowseNavigator.clamped(.card(shelf: 0, index: 2), to: emptied)
         #expect(result == .card(shelf: 1, index: 0))
     }
 
     @Test("focus in the guide is never disturbed by layout changes")
     func guideFocusSurvivesLayoutChange() {
-        let empty = BrowseLayout(chipCount: 0, shelfSizes: [])
+        let empty = BrowseLayout(shelfSizes: [])
         #expect(BrowseNavigator.clamped(.rail(.subscriptions), to: empty) == .rail(.subscriptions))
     }
 }

@@ -1,78 +1,118 @@
 import SwiftUI
 import YouTubeCore
 
-/// One 16:9 shelf card.
+/// One shelf card: 16:9 thumbnail with title, channel and view/age line beneath.
 ///
-/// Unfocused it is thumbnail-only, which is what gives a leanback shelf its
-/// clean look; the title and channel appear only under the focused card. The
-/// metadata block is always laid out (hidden by opacity, not removed) so the
-/// row's height never changes as focus travels along it.
+/// Two things here were measured off the real client and are easy to get wrong:
+///
+/// 1. **The metadata is always visible.** Every tile renders title, channel and
+///    view count whether or not it has focus. Focus changes the *title colour*
+///    (`#AAAAAA` → `#F1F1F1`) and nothing else about the text.
+/// 2. **Focus does not move or resize the card.** It draws a 0.375rem `#F1F1F1`
+///    ring inset 0.35rem *outside* the thumbnail, with a correspondingly larger
+///    corner radius so it stays concentric. No scale, no shadow, no dimming of
+///    the unfocused cards. That stillness is a large part of why the real client
+///    reads as a TV UI rather than a website.
 struct VideoCard: View {
 
     let video: Video
     let isFocused: Bool
+    /// The first shelf uses larger tiles than the rest.
+    let isHero: Bool
+
+    @Environment(\.viewportSize) private var viewport
+
+    private var width: CGFloat { Theme.Metrics.cardWidth(viewport, hero: isHero) }
+    private var thumbHeight: CGFloat { width / Theme.Metrics.cardAspect }
+    private var corner: CGFloat { Theme.Metrics.thumbCorner(viewport) }
+    private var ring: CGFloat { Theme.Metrics.focusRingWidth(viewport) }
+    private var ringInset: CGFloat { Theme.Metrics.focusRingInset(viewport) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .bottomTrailing) {
-                ThumbnailView(url: video.thumbnailURL)
-                    .frame(width: Theme.Metrics.cardWidth,
-                           height: Theme.Metrics.cardWidth / Theme.Metrics.cardAspect)
-                    .clipShape(.rect(cornerRadius: Theme.Metrics.cardCorner))
+        VStack(alignment: .leading, spacing: Theme.Metrics.thumbToMeta(viewport)) {
+            thumbnail
+            metadata
+        }
+        .frame(width: width, alignment: .leading)
+    }
 
-                if let duration = video.duration, !video.isLive {
-                    Text(formatDuration(duration))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.black.opacity(0.78), in: .rect(cornerRadius: 5))
-                        .padding(7)
-                } else if video.isLive {
-                    Text("LIVE")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Theme.brand, in: .rect(cornerRadius: 5))
-                        .padding(7)
-                }
+    private var thumbnail: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ThumbnailView(url: video.thumbnailURL)
+                .frame(width: width, height: thumbHeight)
+                .clipShape(.rect(cornerRadius: corner))
 
-                if let progress = video.watchProgress, progress > 0.01 {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(.white.opacity(0.28))
-                            Rectangle().fill(Theme.brand)
-                                .frame(width: geometry.size.width * min(progress, 1))
-                        }
+            if let progress = video.watchProgress, progress > 0.01 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Theme.track)
+                        Rectangle().fill(Theme.brand)
+                            .frame(width: geo.size.width * min(progress, 1))
                     }
-                    .frame(height: 4)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .clipShape(.rect(bottomLeadingRadius: Theme.Metrics.cardCorner,
-                                     bottomTrailingRadius: Theme.Metrics.cardCorner))
                 }
+                .frame(height: Theme.Metrics.watchProgressHeight(viewport))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .clipShape(.rect(bottomLeadingRadius: corner, bottomTrailingRadius: corner))
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.Metrics.cardCorner)
-                    .strokeBorder(.white, lineWidth: isFocused ? 3 : 0)
-            }
-            .shadow(color: .black.opacity(isFocused ? 0.55 : 0),
-                    radius: isFocused ? 24 : 0, y: isFocused ? 12 : 0)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(video.deArrowTitle ?? video.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2, reservesSpace: true)
-                Text(video.channelTitle)
-                    .font(.system(size: 13))
+            if video.isLive {
+                durationBadge("LIVE", fill: Theme.brand)
+            } else if let duration = video.duration {
+                durationBadge(formatDuration(duration), fill: Theme.durationBadge)
+            }
+        }
+        .overlay {
+            // Drawn outside the thumbnail rather than on its edge, so the ring
+            // never eats into the image.
+            RoundedRectangle(cornerRadius: corner + ringInset)
+                .strokeBorder(Theme.focusRing, lineWidth: isFocused ? ring : 0)
+                .padding(-ringInset)
+        }
+        .animation(Theme.stateChange, value: isFocused)
+    }
+
+    private func durationBadge(_ text: String, fill: Color) -> some View {
+        Text(text)
+            .font(.system(size: Theme.Metrics.rem(1, viewport), weight: .bold))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, Theme.Metrics.rem(0.25, viewport))
+            .padding(.vertical, Theme.Metrics.rem(0.1, viewport))
+            .background(fill, in: .rect(cornerRadius: Theme.Metrics.rem(0.25, viewport)))
+            .padding(Theme.Metrics.badgeInset(viewport))
+    }
+
+    private var metadata: some View {
+        VStack(alignment: .leading, spacing: Theme.Metrics.rem(0.15, viewport)) {
+            Text(video.deArrowTitle ?? video.title)
+                .font(.system(size: Theme.Metrics.cardTitleSize(viewport), weight: .bold))
+                // The one thing focus changes about the text.
+                .foregroundStyle(isFocused ? Theme.textPrimary : Theme.textSecondary)
+                .lineLimit(2, reservesSpace: true)
+                .multilineTextAlignment(.leading)
+                .animation(Theme.stateChange, value: isFocused)
+
+            Text(video.channelTitle)
+                .font(.system(size: Theme.Metrics.cardMetaSize(viewport)))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+
+            HStack(spacing: Theme.Metrics.rem(0.25, viewport)) {
+                if let quality = Format.qualityBadge(video) {
+                    Text(quality)
+                        .font(.system(size: Theme.Metrics.cardMetaSize(viewport), weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.horizontal, Theme.Metrics.rem(0.25, viewport))
+                        .background(Theme.control, in: .rect(cornerRadius: Theme.Metrics.rem(0.25, viewport)))
+                }
+                Text(Format.metaLine(video))
+                    .font(.system(size: Theme.Metrics.cardMetaSize(viewport)))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: Theme.Metrics.cardWidth, alignment: .leading)
-            .opacity(isFocused ? 1 : 0)
         }
-        .scaleEffect(isFocused ? Theme.focusedScale : 1, anchor: .center)
-        .animation(Theme.focusSpring, value: isFocused)
+        // Fixed height regardless of content: a LazyHStack takes its height from
+        // the first subview, so a variable metadata block would clip every card
+        // after the first.
+        .frame(width: width, height: Theme.Metrics.metaBlockHeight(viewport), alignment: .topLeading)
     }
 }

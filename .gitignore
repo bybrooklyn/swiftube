@@ -86,3 +86,6 @@ __pycache__/
 
 # Scratch reference captures
 leanback-*.png
+
+# Playwright MCP artefacts
+.playwright-mcp/

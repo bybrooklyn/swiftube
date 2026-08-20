@@ -3,125 +3,133 @@ import YouTubeCore
 
 /// The vertical stack of horizontal shelves.
 ///
-/// Scrolling here is driven entirely by focus, never by the pointer: when focus
-/// moves, the row scrolls so the focused element parks at a *fixed* anchor. That
-/// is the signature of a leanback UI — content travels to meet the focus, rather
-/// than the focus drifting to the screen edge before anything moves.
+/// Scrolling is driven entirely by focus: rows and cards travel so the focused
+/// element parks at a fixed position. Content moves to meet the focus; the focus
+/// never drifts to the screen edge before anything scrolls.
+///
+/// Both axes use explicit offsets rather than ScrollViews.
+/// `ScrollViewReader.scrollTo(_:anchor:)` aligns *fractions* of the target to the
+/// same fraction of the viewport, which cannot express "park at a fixed inset" —
+/// `.leading` pins a card flush under the guide, and no other anchor gives a
+/// constant inset because the required fraction depends on viewport width.
+///
+/// Because offsets mean nothing is virtualised, each row renders a **window**
+/// around its parked card rather than the whole array. The real client does the
+/// same thing: its virtual list keeps a fixed-width inner div, not the full row.
 struct ShelfListView: View {
 
     @Bindable var model: AppModel
+    @Environment(\.viewportSize) private var viewport
 
     var body: some View {
-        ScrollViewReader { vertical in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: Theme.Metrics.shelfSpacing) {
-                    ForEach(Array(model.shelves.enumerated()), id: \.element.id) { shelfIndex, section in
-                        // A section that finished loading with nothing in it
-                        // (Subscriptions while signed out, say) is skipped
-                        // entirely rather than shown as a bare title over empty
-                        // space. Its slot in `shelfIndex` is preserved so focus
-                        // indices stay stable — BrowseNavigator already steps
-                        // over zero-length shelves.
-                        if !section.videos.isEmpty || section.isLoading {
-                            ShelfRow(
-                                title: section.section.title,
-                                videos: section.videos,
-                                isLoading: section.isLoading,
-                                shelfIndex: shelfIndex,
-                                model: model
-                            )
-                            .id(shelfIndex)
-                        }
-                    }
-                }
-                .padding(.vertical, 48)
-            }
-            .scrollDisabled(true)
-            .onChange(of: model.focus) { _, newValue in
-                guard let shelf = newValue.shelfIndex else { return }
-                withAnimation(Theme.focusSpring) {
-                    // The row parks a third of the way down rather than centred:
-                    // a TV viewer wants to see what is coming next below, and a
-                    // centred row wastes the bottom half of the screen.
-                    vertical.scrollTo(shelf, anchor: UnitPoint(x: 0, y: Theme.Metrics.rowParkFraction))
-                }
+        let shelves = model.shelves
+        // Falls back to the shelf last focused, not zero. `shelfIndex` is nil
+        // for the guide and the top bar, so keying straight off it scrolled the
+        // whole feed back to the first shelf the moment the guide opened — and
+        // animated it back down on the way out.
+        let parkedRow = model.parkedShelf
+
+        VStack(alignment: .leading, spacing: Theme.Metrics.shelfGap(viewport)) {
+            ForEach(Array(shelves.enumerated()), id: \.element.id) { index, shelf in
+                ShelfRow(shelf: shelf, shelfIndex: index, isHero: index == 0, model: model)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Rows above the focused one translate off the top; the focused header
+        // parks near the top of the content area.
+        .offset(y: -model.rowOffset(upTo: parkedRow, viewport: viewport))
+        .animation(Theme.travel, value: parkedRow)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .clipped()
     }
 }
 
 private struct ShelfRow: View {
 
-    let title: String
-    let videos: [Video]
-    let isLoading: Bool
+    let shelf: AppModel.Shelf
     let shelfIndex: Int
+    let isHero: Bool
     @Bindable var model: AppModel
+    @Environment(\.viewportSize) private var viewport
 
-    private var isActiveShelf: Bool { model.focus.shelfIndex == shelfIndex }
+    private var isActive: Bool { model.focus.shelfIndex == shelfIndex }
+    private var inset: CGFloat { Theme.Metrics.contentInset(viewport) }
+
+    /// How far ahead of the parked card to build.
+    ///
+    /// The window only ever *grows*: it starts at the front of the row and
+    /// extends as focus advances. An earlier version slid a window along
+    /// (`parked-2 ..< parked+8`), which meant moving left or right changed which
+    /// cards existed — SwiftUI then animated those insertions and removals at
+    /// the same time as the row's offset, so cards visibly popped in and out
+    /// mid-travel. Growing only keeps every card that has ever been on screen
+    /// alive, so a move is purely a translate.
+    private static let windowAhead = 10
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.system(size: 21, weight: .semibold))
-                // The active row's title brightens. It is a small thing, but with
-                // several rows onscreen it is what tells you which one you are in
-                // before you have looked at the cards.
-                .foregroundStyle(isActiveShelf ? Theme.textPrimary : Theme.textSecondary)
-                .animation(Theme.focusSpring, value: isActiveShelf)
-                .padding(.leading, Theme.Metrics.contentInset)
+        VStack(alignment: .leading, spacing: Theme.Metrics.rem(0.75, viewport)) {
+            Text(shelf.title)
+                .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .medium))
+                // The header gets its own block rather than hugging the text, so
+                // it clears the search pill above it the way the reference does.
+                .frame(height: Theme.Metrics.rem(2.625, viewport), alignment: .bottom)
+                // The active shelf's header brightens — with several rows on
+                // screen it says which one you are in before you look at cards.
+                .foregroundStyle(isActive ? Theme.textPrimary : Theme.textTertiary)
+                .animation(Theme.stateChange, value: isActive)
+                .padding(.leading, inset)
 
-            if videos.isEmpty && isLoading {
-                placeholderRow
+            if shelf.videos.isEmpty {
+                placeholder
             } else {
-                cardRow
+                cards
             }
         }
     }
 
-    private var cardRow: some View {
-        // Laid out with an explicit offset rather than a ScrollView.
-        //
-        // Scrolling here is entirely focus-driven — the user never drags a row —
-        // and `ScrollViewReader.scrollTo(_:anchor:)` cannot express "park the
-        // focused card at a fixed inset from the left". Its anchors align
-        // *fractions* of the target to the same fraction of the viewport, so
-        // `.leading` pins the card flush to the edge, tucked under the guide
-        // rail, and no other anchor value gives a constant inset because the
-        // required fraction depends on the viewport width. A direct offset is
-        // exact, and it makes the parking rule a single readable line.
-        let step = Theme.Metrics.cardWidth + Theme.Metrics.cardSpacing
+    private var cards: some View {
+        let width = Theme.Metrics.cardWidth(viewport, hero: isHero)
+        let step = width + Theme.Metrics.cardGutter(viewport)
         let parked = model.parkedIndex(forShelf: shelfIndex)
 
-        return HStack(spacing: Theme.Metrics.cardSpacing) {
-            ForEach(Array(videos.enumerated()), id: \.element.id) { index, video in
-                VideoCard(video: video, isFocused: model.isFocused(shelf: shelfIndex, index: index))
+        let upper = min(shelf.videos.count, parked + Self.windowAhead)
+        let window = Array(shelf.videos.prefix(upper).enumerated())
+
+        return HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
+            ForEach(window, id: \.element.id) { index, video in
+                VideoCard(video: video,
+                          isFocused: model.isFocused(shelf: shelfIndex, index: index),
+                          isHero: isHero)
             }
         }
-        // Room for the focused card to scale up and cast its shadow without the
-        // mask below shaving the top and bottom off it.
-        .padding(.vertical, 26)
         .offset(x: -CGFloat(parked) * step)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, Theme.Metrics.contentInset)
-        // Horizontal clip only: cards scrolled off to the left must not draw
-        // over the guide rail, but a vertical clip would cut the focused card's
-        // shadow off square.
-        .mask(Rectangle().padding(.vertical, -400))
-        .animation(Theme.focusSpring, value: parked)
+        // Order matters: pad first so the cards sit at the content inset, then
+        // mask in that same padded space so nothing draws to the left of it.
+        // Masking before padding clips in the *unpadded* space and then shifts
+        // the result right, which eats the leading inset off the first card.
+        //
+        // The vertical over-expansion keeps only the horizontal edges clipping,
+        // so a focused card's ring is never squared off top or bottom.
+        .padding(.leading, inset)
+        .mask(
+            Rectangle()
+                .padding(.leading, inset)
+                .padding(.vertical, -viewport.height)
+        )
+        .animation(Theme.travel, value: parked)
     }
 
-    private var placeholderRow: some View {
-        HStack(spacing: Theme.Metrics.cardSpacing) {
-            ForEach(0..<5, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: Theme.Metrics.cardCorner)
+    private var placeholder: some View {
+        let width = Theme.Metrics.cardWidth(viewport, hero: isHero)
+        return HStack(spacing: Theme.Metrics.cardGutter(viewport)) {
+            ForEach(0..<4, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: Theme.Metrics.thumbCorner(viewport))
                     .fill(Theme.surface)
-                    .frame(width: Theme.Metrics.cardWidth,
-                           height: Theme.Metrics.cardWidth / Theme.Metrics.cardAspect)
+                    .frame(width: width, height: width / Theme.Metrics.cardAspect)
             }
         }
-        .padding(.horizontal, Theme.Metrics.contentInset)
-        .padding(.vertical, 26)
+        .padding(.leading, inset)
         .redacted(reason: .placeholder)
     }
 }
