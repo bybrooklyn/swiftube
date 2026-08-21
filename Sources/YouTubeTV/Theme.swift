@@ -102,7 +102,10 @@ enum Theme {
         static func guidePush(_ s: CGSize) -> CGFloat { rem(15.75, s) }
         static func railItemHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         static func railPillWidth(_ s: CGSize) -> CGFloat { rem(18.5, s) }
-        static func railPillCorner(_ s: CGSize) -> CGFloat { rem(0.6, s) }
+        /// Square. The guide is a rectangular column and a rounded highlight
+        /// inside it reads as a different object sitting on top, rather than
+        /// part of the sidebar.
+        static func railPillCorner(_ s: CGSize) -> CGFloat { 0 }
         static func railPillHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         /// Left edge of the selection shape, and of the dividers.
         static func railPillLeading(_ s: CGSize) -> CGFloat { rem(1.375, s) }

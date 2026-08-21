@@ -155,6 +155,12 @@ private struct ShelfRow: View {
         // Pad first so the cards sit at the content inset, then clip in that
         // same padded space so nothing draws to the left of it.
         //
+        // The clip is pulled back by `focusRingInset`, because the focused
+        // card's ring is drawn *outside* the thumbnail by exactly that much.
+        // Clipping at the card edge sliced the ring's left side off, which read
+        // as the selection running into the sidebar. Pulled back it still stops
+        // 0.5rem clear of the collapsed rail, so nothing is drawn under it.
+        //
         // A rectangular `clipShape` rather than `.mask(Rectangle())`: a mask is
         // an alpha composite, so every row rendered its whole strip of cards
         // into an offscreen buffer and blended it back on each frame. Ten rows
@@ -163,7 +169,8 @@ private struct ShelfRow: View {
         // The shape overflows vertically so only the horizontal edges clip and
         // a focused card's ring is never squared off top or bottom.
         .padding(.leading, inset)
-        .clipShape(ShelfClip(leading: inset, verticalOverflow: viewport.height))
+        .clipShape(ShelfClip(leading: inset - Theme.Metrics.focusRingInset(viewport),
+                             verticalOverflow: viewport.height))
         .animation(Theme.travel, value: parked)
     }
 

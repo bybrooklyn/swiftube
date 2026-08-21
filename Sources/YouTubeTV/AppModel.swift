@@ -768,11 +768,17 @@ final class AppModel {
             urls += shelves[neighbour].videos.prefix(6).compactMap(\.thumbnailURL)
         }
 
-        thumbnailTask?.cancel()
-        thumbnailTask = Task { await ThumbnailLoader.shared.prefetch(urls) }
+        // Deliberately *not* cancelled between calls.
+        //
+        // This used to cancel the previous prefetch on every move, which is the
+        // reason the picture still lagged the title: holding a direction fires
+        // a move every ~150 ms, each one killing the download the last one
+        // started, so a thumbnail was never actually finished ahead of the
+        // focus. The loader already skips what is cached and joins what is
+        // in flight, so letting overlapping calls run costs a dictionary lookup
+        // and converges, where cancelling cost the entire feature.
+        Task { await ThumbnailLoader.shared.prefetch(urls) }
     }
-
-    @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
 
     /// Pulls the next page in as focus approaches the end of a row, so the feed
     /// grows before the user reaches its edge rather than stopping dead.
