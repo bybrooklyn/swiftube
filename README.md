@@ -107,10 +107,14 @@ Two conventions in the UI worth knowing:
 
 ## Status
 
-Browsing, search, settings, sign-in, the guide, the player and its menu all
-work. Feature parity with the real client is not complete; the gaps are listed
-in `CLAUDE.md` alongside the traps worth knowing before changing the build or
-the playback pipeline.
+Browsing, search, settings, sign-in, the guide, channel pages, the player with
+its menu, up-next and comments all work, and **playback runs at 1080p** over
+VisionOS HLS.
+
+Not done: descriptions and the stats overlay in the player are still buttons
+without surfaces, comments are one page with no continuation, and channel pages
+show uploads rather than tabs for playlists. `CLAUDE.md` has the playback traps
+worth reading before touching that pipeline.
 
 **Signed out, YouTube returns an empty home feed**, and the app falls back to a
 plain "popular" search — so if the shelves look generic, run `just signin`.
