@@ -149,6 +149,11 @@ struct TVPlayerView: View {
             Scrubber(model: model)
                 .padding(.bottom, rem(0.5))
             transportRow
+            if model.isUpNextOpen {
+                UpNextRail(model: model)
+                    .padding(.top, rem(1.0))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, inset)

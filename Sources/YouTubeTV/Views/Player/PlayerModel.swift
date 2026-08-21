@@ -36,6 +36,20 @@ final class PlayerModel {
     /// Set when the player should close and hand focus back to the browse surface.
     var didRequestDismiss = false
 
+    /// Which related video has focus while the up-next rail is open; nil when
+    /// it is closed. The rail is opened by pressing Down from the transport,
+    /// the same gesture the real client uses, and it is modal in the same way
+    /// the settings menu is: while it is up it takes every directional press,
+    /// so the transport cannot move underneath it.
+    private(set) var upNextIndex: Int?
+
+    var isUpNextOpen: Bool { upNextIndex != nil }
+
+    /// What plays next. `PlaybackViewModel` already fills this from `/next` and
+    /// already autoplays the first entry when a video ends — until now nothing
+    /// ever showed it, so playback looked like a dead end even though it was not.
+    var upNext: [Video] { playback.relatedVideos }
+
     @ObservationIgnored private var hideTask: Task<Void, Never>?
 
     /// How long the controls stay up after the last input.
@@ -76,6 +90,7 @@ final class PlayerModel {
     }
 
     func play(_ video: Video) {
+        upNextIndex = nil
         playback.load(video: video)
         showControls()
         loadChannelAvatar(for: video.channelId)
@@ -121,6 +136,34 @@ final class PlayerModel {
             return
         }
 
+        if let index = upNextIndex {
+            switch intent {
+            case .move(.left):
+                if index > 0 { withAnimation(Theme.stateChange) { upNextIndex = index - 1 } }
+            case .move(.right):
+                if index + 1 < upNext.count { withAnimation(Theme.stateChange) { upNextIndex = index + 1 } }
+            case .move(.up), .back:
+                closeUpNext()
+            case .move(.down):
+                break
+            case .select:
+                if upNext.indices.contains(index) {
+                    let video = upNext[index]
+                    closeUpNext()
+                    play(video)
+                }
+            case .playPause:
+                playback.togglePlayPause()
+            case let .seek(direction):
+                playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+            case .menu:
+                closeUpNext()
+                openMenu()
+            }
+            showControls()
+            return
+        }
+
         // A SponsorBlock prompt takes Select first, whatever the transport is
         // doing — the prompt is time-limited, so making the user first reveal
         // the controls and then find a button would make it useless.
@@ -142,6 +185,10 @@ final class PlayerModel {
             // Otherwise a nudge of the stick to see the timeline would also skip
             // a video, which is infuriating.
             guard !wasHidden else { return }
+            if direction == .down, !upNext.isEmpty {
+                withAnimation(Theme.stateChange) { upNextIndex = 0 }
+                return
+            }
             if let next = PlayerNavigator.next(from: focusedControl, direction: direction) {
                 withAnimation(Theme.stateChange) { focusedControl = next }
             }
@@ -180,6 +227,24 @@ final class PlayerModel {
             // Not yet wired to a surface of their own.
             break
         }
+    }
+
+    private func closeUpNext() {
+        withAnimation(Theme.stateChange) { upNextIndex = nil }
+    }
+
+    /// Pointer support, matching the browse surface: hover focuses, click plays.
+    func hoverUpNext(_ index: Int) {
+        guard upNext.indices.contains(index), upNextIndex != index else { return }
+        withAnimation(Theme.stateChange) { upNextIndex = index }
+        showControls()
+    }
+
+    func clickUpNext(_ index: Int) {
+        guard upNext.indices.contains(index) else { return }
+        let video = upNext[index]
+        closeUpNext()
+        play(video)
     }
 
     func openMenu() {
