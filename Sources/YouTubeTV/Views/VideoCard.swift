@@ -38,7 +38,7 @@ struct VideoCard: View {
 
     private var thumbnail: some View {
         ZStack(alignment: .bottomTrailing) {
-            ThumbnailView(url: video.thumbnailURL)
+            ThumbnailView(url: video.thumbnailURL, fallbacks: video.thumbnailFallbackURLs)
                 .frame(width: width, height: thumbHeight)
                 .clipShape(.rect(cornerRadius: corner))
                 // The progress bar is an *overlay* on the thumbnail, not a

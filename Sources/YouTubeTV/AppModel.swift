@@ -364,6 +364,7 @@ final class AppModel {
                 isRailExpanded = next.isInRail
             }
             loadMoreIfNearRowEnd()
+            prefetchFocusedVideo()
 
         case .select:
             switch focus {
@@ -473,6 +474,34 @@ final class AppModel {
     private func dismissPlayer() {
         withAnimation(Theme.travel) { player = nil }
     }
+
+    /// Starts resolving the focused video's stream after a short dwell.
+    ///
+    /// The real client begins an inline preview once focus settles on a card;
+    /// this does the half that matters most on a slow path — it gets the player
+    /// response, PO token and SponsorBlock segments in flight before Select is
+    /// pressed, so opening a video is not a cold start. `VideoPreloadCache`
+    /// already does all of this and was simply never being called.
+    ///
+    /// Debounced, because moving along a row would otherwise fire a /player
+    /// request per keypress.
+    private func prefetchFocusedVideo() {
+        prefetchTask?.cancel()
+        guard case let .card(shelf, index) = focus,
+              let video = video(shelf: shelf, index: index) else { return }
+        let categories = settingsStore.settings.activeSponsorCategories
+        let token = auth.accessToken
+        prefetchTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            await VideoPreloadCache.shared.prefetch(videoId: video.id,
+                                                    sponsorCategories: categories,
+                                                    authToken: token,
+                                                    priority: .visible)
+        }
+    }
+
+    @ObservationIgnored private var prefetchTask: Task<Void, Never>?
 
     /// Pulls the next page in as focus approaches the end of a row, so the feed
     /// grows before the user reaches its edge rather than stopping dead.

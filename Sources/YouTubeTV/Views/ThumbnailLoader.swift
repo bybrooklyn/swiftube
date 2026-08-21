@@ -61,6 +61,15 @@ actor ThumbnailLoader {
 /// arrives so rows never reflow mid-scroll.
 struct ThumbnailView: View {
     let url: URL?
+    /// Static CDN URLs to try when `url` fails.
+    ///
+    /// The URL that arrives on a renderer is a signed `sqp=` variant, and those
+    /// expire and 404 — which rendered as a permanently blank card, since the
+    /// loader simply returned nil and the view kept its placeholder. `Video`
+    /// already exposes an ordered `thumbnailFallbackURLs` ladder
+    /// (sd → hq → mq) that nothing was using.
+    var fallbacks: [URL] = []
+
     @State private var image: NSImage?
 
     var body: some View {
@@ -78,11 +87,18 @@ struct ThumbnailView: View {
             // the view kept the outgoing card's thumbnail until the next one
             // downloaded, and the image visibly lagged the text along a row.
             image = url.flatMap { ThumbnailLoader.cachedImage(for: $0) }
-            guard let url, image == nil else { return }
+            guard image == nil else { return }
 
-            let loaded = await ThumbnailLoader.shared.image(for: url)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.15)) { image = loaded }
+            // Walk the ladder until one loads, so an expired signed URL costs a
+            // retry rather than an empty card.
+            for candidate in ([url].compactMap { $0 } + fallbacks) {
+                let loaded = await ThumbnailLoader.shared.image(for: candidate)
+                guard !Task.isCancelled else { return }
+                if let loaded {
+                    withAnimation(.easeOut(duration: 0.15)) { image = loaded }
+                    return
+                }
+            }
         }
     }
 }
