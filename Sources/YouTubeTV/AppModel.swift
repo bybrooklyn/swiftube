@@ -167,6 +167,24 @@ final class AppModel {
         case "search":   openSearch()
         default:         break
         }
+
+        // Same seam, for playback:
+        //   YOUTUBETV_PLAY=<videoId> open build/YouTube.app
+        // Starting a video otherwise takes a keypress, and a keypress needs the
+        // window frontmost — which is not always available, and not something
+        // to take from someone who is using their machine. This makes a change
+        // to the playback pipeline checkable from the log alone.
+        if let videoId = ProcessInfo.processInfo.environment["YOUTUBETV_PLAY"],
+           !videoId.isEmpty {
+            // Deferred a turn: `start()` runs from the root view's `.task`, and
+            // presenting the player from inside that first update re-enters the
+            // update it is part of — the app came up with no window at all and
+            // 0% CPU, which looks exactly like the raw-binary launch trap in
+            // CLAUDE.md and is not one.
+            Task { @MainActor [weak self] in
+                self?.present(Video(id: videoId, title: videoId, channelTitle: ""))
+            }
+        }
         input.start { [weak self] intent in
             self?.handle(intent)
         }

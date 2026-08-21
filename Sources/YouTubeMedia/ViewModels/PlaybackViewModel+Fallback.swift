@@ -109,11 +109,18 @@ extension PlaybackViewModel {
             await probeStreamMethod(method, video: video)
             return
         }
-        #if os(tvOS)
-        // tvOS cannot use the WKWebView/BotGuard recovery available on iOS/macOS.
-        // Current yt-dlp uses VISIONOS as its primary JS-less Apple client. After
-        // seeding a normal YouTube webpage session it returns token-free HLS with
-        // H.264 through 1080p, which AVPlayer handles natively on Apple TV.
+        // VISIONOS is yt-dlp's primary JS-less Apple client: after seeding a
+        // normal YouTube webpage session it returns **token-free HLS** with
+        // H.264 through 1080p, which AVPlayer handles natively.
+        //
+        // This was `#if os(tvOS)`, added on the reasoning that tvOS cannot use
+        // the WKWebView/BotGuard recovery that iOS and macOS can. That reasoning
+        // held only while the macOS recovery worked. It does not: every path it
+        // offers ends in `rqh=1`, and rqh is enforced by *position* — playback
+        // dies at byte 3,276,800 whether the range is asked for by header or by
+        // query, on a re-signed URL, or with a minted `pot=` token. Token-free
+        // HLS has no such wall, and the one client that returns it was the one
+        // client compiled out of this build.
         do {
             let visionInfo = try await api.fetchPlayerInfoVisionOS(videoId: video.id)
             if await tryAllStreams(
@@ -129,7 +136,6 @@ extension PlaybackViewModel {
         } catch {
             playerLog.notice("[VisionOS] player request failed: \(error) — continuing legacy fallbacks")
         }
-        #endif
         // Phase -2: authenticated TV client, first.
         //
         // For a signed-in user this is the path most likely to work — the TV
