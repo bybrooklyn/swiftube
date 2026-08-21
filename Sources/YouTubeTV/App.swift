@@ -103,6 +103,26 @@ enum HeadlessAuth {
             while Date() < deadline {
                 try? await Task.sleep(for: .seconds(1))
                 if auth.isSignedIn {
+                    // Confirm the token actually reached disk before exiting.
+                    //
+                    // `isSignedIn` flips as soon as the exchange succeeds, but
+                    // persistence runs on the TokenManager actor. Exiting on the
+                    // flag alone raced that write: sign-in reported success and
+                    // the credentials file was still `{}`, so the next launch
+                    // was signed out and playback failed with LOGIN_REQUIRED.
+                    var persisted = false
+                    for _ in 0..<20 {
+                        if await auth.tokenManager.currentAccessToken() != nil {
+                            persisted = true
+                            break
+                        }
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
+                    guard persisted else {
+                        print("✗ Signed in, but the credentials could not be saved.")
+                        result.done = true
+                        return
+                    }
                     print("")
                     print("✅ Signed in as \(auth.accountName ?? "your account").")
                     print("   Launch the app with `just open-app`.")

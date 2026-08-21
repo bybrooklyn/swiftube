@@ -42,6 +42,28 @@ extension InnerTubeAPI {
             return str.count > 2000 ? String(str.prefix(2000)) + "\n...(truncated)" : str
         }
 
+        /// Finds the first readable text in a header renderer.
+        ///
+        /// TV shelf headers nest their title differently per surface, so rather
+        /// than hard-coding one path we take the first thing `extractText` can
+        /// read — which in practice is the shelf name.
+        func walkForTitle(_ obj: Any, depth: Int = 0) -> String? {
+            guard depth < 6 else { return nil }
+            if let dict = obj as? [String: Any] {
+                if let title = dict["title"] as? [String: Any], let text = extractText(title) {
+                    return text
+                }
+                for value in dict.values {
+                    if let found = walkForTitle(value, depth: depth + 1) { return found }
+                }
+            } else if let arr = obj as? [Any] {
+                for item in arr {
+                    if let found = walkForTitle(item, depth: depth + 1) { return found }
+                }
+            }
+            return nil
+        }
+
         func walkShelfContents(_ obj: Any, depth: Int = 0) -> [Video] {
             guard depth < 50 else {
                 tubeLog.warning("walkShelfContents: depth limit (50) reached — skipping subtree")
@@ -49,7 +71,10 @@ extension InnerTubeAPI {
             }
             var videos: [Video] = []
             if let dict = obj as? [String: Any] {
-                if let vr = dict["videoRenderer"] as? [String: Any], let v = parseVideoRenderer(vr) {
+                // TVHTML5 rows are made of tiles, not videoRenderers.
+                if let tile = dict["tileRenderer"] as? [String: Any], let v = parseTileRenderer(tile) {
+                    videos.append(v)
+                } else if let vr = dict["videoRenderer"] as? [String: Any], let v = parseVideoRenderer(vr) {
                     videos.append(v)
                 } else if let ri = dict["richItemRenderer"] as? [String: Any],
                           let content = ri["content"] as? [String: Any] {
@@ -106,6 +131,32 @@ extension InnerTubeAPI {
                     }
                     return
                 }
+                // TVHTML5 shelves.
+                //
+                // The two renderers above are WEB shapes. The authenticated TV
+                // client wraps its rows in a plain `shelfRenderer` whose items
+                // are `tileRenderer`s, usually under `content.horizontalListRenderer`
+                // — so on the TV feed nothing matched here, `rows` came back
+                // empty, and the flat fallback below collapsed the whole feed
+                // into one shelf called "Home". That is why the app showed a
+                // single row where the real client shows "Recommended",
+                // "New to you" and the rest.
+                if let shelf = dict["shelfRenderer"] as? [String: Any] {
+                    var title = (shelf["title"] as? [String: Any]).flatMap { extractText($0) }
+                    if title == nil, let header = shelf["headerRenderer"] as? [String: Any] {
+                        // TV shelves often carry the name on a header renderer.
+                        title = walkForTitle(header)
+                    }
+                    // Items live under one of several content wrappers depending
+                    // on the surface; walk whichever is present.
+                    let content = shelf["content"] ?? shelf["contents"] ?? shelf
+                    let videos = walkShelfContents(content as Any)
+                    if !videos.isEmpty {
+                        rows.append(VideoGroup(title: title, videos: videos, layout: .row))
+                    }
+                    return
+                }
+
                 if let contItem = dict["continuationItemRenderer"] as? [String: Any],
                    let contEndpoint = contItem["continuationEndpoint"] as? [String: Any],
                    let contCmd = contEndpoint["continuationCommand"] as? [String: Any],

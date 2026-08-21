@@ -95,15 +95,33 @@ private struct ShelfRow: View {
         let upper = min(shelf.videos.count, parked + Self.windowAhead)
         let window = Array(shelf.videos.prefix(upper).enumerated())
 
-        return HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
-            ForEach(window, id: \.element.id) { index, video in
-                VideoCard(video: video,
-                          isFocused: model.isFocused(shelf: shelfIndex, index: index),
-                          isHero: isHero)
+        // The wide strip of cards is an OVERLAY on a zero-width spacer, not a
+        // laid-out child.
+        //
+        // A row is deliberately far wider than the window — it is a long strip
+        // translated left — and as a normal child it made every ancestor adopt
+        // that width. A ZStack takes the size of its largest child, so the whole
+        // root inflated, and anything using `maxWidth: .infinity` inherited the
+        // oversized proposal: the player's scrubber ran off the right edge and
+        // its right-hand button cluster was laid out off-screen entirely.
+        // `.clipped()` does not help — clipping changes what is drawn, never the
+        // layout size. An overlay does not contribute to its parent's size at
+        // all, which is exactly the property needed here.
+        return Color.clear
+            .frame(height: width / Theme.Metrics.cardAspect
+                   + Theme.Metrics.thumbToMeta(viewport)
+                   + Theme.Metrics.metaBlockHeight(viewport))
+            .overlay(alignment: .topLeading) {
+                HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
+                    ForEach(window, id: \.element.id) { index, video in
+                        VideoCard(video: video,
+                                  isFocused: model.isFocused(shelf: shelfIndex, index: index),
+                                  isHero: isHero)
+                    }
+                }
+                .offset(x: -CGFloat(parked) * step)
+                .fixedSize()
             }
-        }
-        .offset(x: -CGFloat(parked) * step)
-        .frame(maxWidth: .infinity, alignment: .leading)
         // Order matters: pad first so the cards sit at the content inset, then
         // mask in that same padded space so nothing draws to the left of it.
         // Masking before padding clips in the *unpadded* space and then shifts

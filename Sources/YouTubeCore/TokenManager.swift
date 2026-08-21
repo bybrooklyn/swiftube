@@ -189,7 +189,11 @@ public actor TokenManager {
 
     private static func save(_ values: [String: String]) {
         guard let data = try? JSONEncoder().encode(values) else { return }
-        try? data.write(to: storeURL, options: [.atomic, .completeFileProtection])
+        // `.atomic` only. `.completeFileProtection` is an iOS data-protection
+        // class; asking for it on macOS makes the write fail, and `try?` would
+        // swallow that silently — leaving an empty credentials file and a user
+        // who appears signed in until the next launch.
+        try? data.write(to: storeURL, options: [.atomic])
         // Owner-only, in case the file predates this attribute.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                ofItemAtPath: storeURL.path)
