@@ -152,48 +152,60 @@ public actor TokenManager {
         }
     }
 
-    // MARK: - Static (nonisolated) Keychain helpers
-    // Static methods are nonisolated — safe to call from actor init.
+    // MARK: - Storage
+    //
+    // A 0600 JSON file under Application Support, deliberately **not** the
+    // macOS Keychain.
+    //
+    // Keychain items are scoped to the signing identity that created them, and
+    // this app is signed locally — every rebuild that changes the signature
+    // makes macOS treat it as a different app and put up a "YouTube wants to
+    // use your login keychain" password prompt. During development that is
+    // constant, and a modal SecurityAgent panel blocks the app before its
+    // window even appears. A local, personal client is not worth that, so the
+    // tokens live in a file the user owns instead.
+    //
+    // The tradeoff is explicit: file permissions rather than Keychain
+    // encryption. Anything with read access to the home directory can read the
+    // OAuth token, exactly as it could read a browser's cookie jar.
+
+    private static let storeURL: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        let directory = base.appendingPathComponent("SwifTube", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        return directory.appendingPathComponent("credentials.json")
+    }()
+
+    /// The whole store, read fresh each time. It is a handful of short strings
+    /// and is touched only at sign-in, sign-out and launch.
+    private static func load() -> [String: String] {
+        guard let data = try? Data(contentsOf: storeURL),
+              let values = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return values
+    }
+
+    private static func save(_ values: [String: String]) {
+        guard let data = try? JSONEncoder().encode(values) else { return }
+        try? data.write(to: storeURL, options: [.atomic, .completeFileProtection])
+        // Owner-only, in case the file predates this attribute.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: storeURL.path)
+    }
 
     private static func kcGet(service: String, key: String) -> String? {
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: key,
-            kSecReturnData:  true,
-            kSecMatchLimit:  kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data
-        else { return nil }
-        return String(data: data, encoding: .utf8)
+        load()[key]
     }
 
     private static func kcSet(service: String, key: String, value: String?) {
-        let deleteQuery: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: key,
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-        guard let value, let data = value.data(using: .utf8) else { return }
-        let addQuery: [CFString: Any] = [
-            kSecClass:          kSecClassGenericPassword,
-            kSecAttrService:    service,
-            kSecAttrAccount:    key,
-            kSecValueData:      data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
+        var values = load()
+        if let value { values[key] = value } else { values.removeValue(forKey: key) }
+        save(values)
     }
 
     private static func kcDelete(service: String, key: String) {
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: key,
-        ]
-        SecItemDelete(query as CFDictionary)
+        kcSet(service: service, key: key, value: nil)
     }
 }

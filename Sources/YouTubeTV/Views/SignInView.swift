@@ -105,7 +105,14 @@ struct SignInView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Top-leading with explicit padding, mirroring SettingsView — which
+        // renders correctly in this same overlay position. Centring inside an
+        // infinite frame is what the earlier version did, and it drew nothing
+        // at all while its background still painted.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 96)
+        .padding(.top, 56)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
     }
 

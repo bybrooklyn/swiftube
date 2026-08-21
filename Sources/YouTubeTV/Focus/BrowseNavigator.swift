@@ -134,7 +134,15 @@ public enum BrowseNavigator {
     /// surface has chips, otherwise the first card of the first loaded shelf.
     public static func defaultContentFocus(layout: BrowseLayout) -> BrowseFocus {
         if let shelf = layout.firstFocusableShelf { return .card(shelf: shelf, index: 0) }
-        return layout.hasTopBar ? .topBar(.search) : .rail(.home)
+        // Rest on the first card even when no shelf has loaded yet.
+        //
+        // Returning the search pill here meant every transient empty layout —
+        // the reload that follows sign-in, or switching guide section — parked
+        // focus on the search bar, and `clamped` then preserved it once content
+        // arrived. The user was left on the top bar and had to press Down.
+        // The navigator already steps over empty shelves, so pointing at the
+        // first card is safe before it exists.
+        return .card(shelf: 0, index: 0)
     }
 
     /// Clamps a focus back into range after the layout changes underneath it —

@@ -87,3 +87,16 @@ steam: app
 # Remove the Steam shortcut and its artwork.
 steam-remove:
     ./Scripts/install-to-steam.py --remove
+
+# Sign in to YouTube on the command line (device-code flow). Signing in is what
+# makes the feed real: signed out, YouTube returns an empty home feed and
+# answers the player with LOGIN_REQUIRED.
+# Runs the binary *inside the bundle*, not .build/release: macOS scopes Keychain
+# items to the signing identity, and the bundle is signed separately — a token
+# stored by the loose binary would not be readable by the app.
+signin: app
+    @YOUTUBETV_AUTH=1 "build/YouTube.app/Contents/MacOS/YouTubeTV"
+
+# Forget the stored account.
+signout: app
+    @YOUTUBETV_AUTH=1 YOUTUBETV_SIGNOUT=1 "build/YouTube.app/Contents/MacOS/YouTubeTV"

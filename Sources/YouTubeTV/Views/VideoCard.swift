@@ -41,19 +41,25 @@ struct VideoCard: View {
             ThumbnailView(url: video.thumbnailURL)
                 .frame(width: width, height: thumbHeight)
                 .clipShape(.rect(cornerRadius: corner))
-
-            if let progress = video.watchProgress, progress > 0.01 {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Theme.track)
-                        Rectangle().fill(Theme.brand)
-                            .frame(width: geo.size.width * min(progress, 1))
+                // The progress bar is an *overlay* on the thumbnail, not a
+                // sibling in the ZStack. As a sibling its GeometryReader —
+                // which is greedy — combined with `maxHeight: .infinity` made
+                // the ZStack claim all offered height, so any card with watch
+                // progress grew far taller than its thumbnail and sat out of
+                // line with the rest of the row.
+                .overlay(alignment: .bottom) {
+                    if let progress = video.watchProgress, progress > 0.01 {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Rectangle().fill(Theme.track)
+                                Rectangle().fill(Theme.brand)
+                                    .frame(width: geo.size.width * min(progress, 1))
+                            }
+                        }
+                        .frame(height: Theme.Metrics.watchProgressHeight(viewport))
                     }
                 }
-                .frame(height: Theme.Metrics.watchProgressHeight(viewport))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .clipShape(.rect(bottomLeadingRadius: corner, bottomTrailingRadius: corner))
-            }
+                .clipShape(.rect(cornerRadius: corner))
 
             if video.isLive {
                 durationBadge("LIVE", fill: Theme.brand)

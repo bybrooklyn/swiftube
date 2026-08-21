@@ -47,13 +47,15 @@ struct GuideRail: View {
                                 // scrollOffset — if the two drift, the guide
                                 // scrolls to the wrong place.
                                 .frame(height: Self.dividerHeight(viewport))
-                                .padding(.horizontal, Theme.Metrics.rem(0.4, viewport))
+                                .frame(width: isExpanded
+                                       ? Theme.Metrics.railPillWidth(viewport)
+                                       : iconBox)
+                                .padding(.leading, iconLeading)
                         }
                         row(for: item)
                             .frame(height: Theme.Metrics.railItemHeight(viewport))
                     }
                 }
-                .padding(.horizontal, Theme.Metrics.rem(0.4, viewport))
                 // The guide is taller than the window once a few subscribed
                 // channels are in it, so it scrolls to keep the focused entry
                 // visible instead of running off the bottom.
@@ -127,50 +129,62 @@ struct GuideRail: View {
         }
     }
 
+    /// Diameter of the icon's box — and, collapsed, of the selection circle
+    /// that wraps it exactly.
+    private var iconBox: CGFloat { Theme.Metrics.rem(2.2, viewport) }
+
+    /// Distance from the rail's left edge to the icon box.
+    ///
+    /// Constant in both states. It centres the icon in the collapsed rail, and
+    /// lands at very nearly the same proportional inset in the expanded panel as
+    /// the real client uses — so the icons do not move at all when the panel
+    /// opens; only the labels arrive.
+    private var iconLeading: CGFloat {
+        (Theme.Metrics.railCollapsed(viewport) - iconBox) / 2
+    }
+
     @ViewBuilder
     private func row(for item: RailItem) -> some View {
         let isFocused = focusedItem == item
         let isSelected = selected == item
-        let iconSize = Theme.Metrics.railIconSize(viewport)
+        let width = isExpanded ? Theme.Metrics.railPillWidth(viewport) : iconBox
 
-        HStack(spacing: Theme.Metrics.rem(1.0, viewport)) {
-            icon(for: item, size: iconSize)
-                .frame(width: iconSize * 1.6, height: iconSize * 1.6)
+        HStack(spacing: Theme.Metrics.rem(0.75, viewport)) {
+            icon(for: item, size: Theme.Metrics.railIconSize(viewport))
+                .frame(width: iconBox, height: iconBox)
 
-            if isExpanded {
-                Text(label(for: item))
-                    .font(.system(size: Theme.Metrics.railLabelSize(viewport), weight: .medium))
-                    .lineLimit(1)
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
-            }
+            // Always present, never inserted or removed: conditionally adding
+            // the label made the HStack re-lay-out mid-animation, so the icons
+            // jumped as the panel opened. Here it keeps its natural width and is
+            // revealed by the row's width growing past it.
+            Text(label(for: item))
+                .font(.system(size: Theme.Metrics.railLabelSize(viewport),
+                              weight: isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .fixedSize()
+                .opacity(isExpanded ? 1 : 0)
         }
         .foregroundStyle(isFocused ? .black : (isSelected ? Theme.textPrimary : Theme.textTertiary))
-        .padding(.horizontal, Theme.Metrics.rem(0.55, viewport))
-        .padding(.vertical, Theme.Metrics.rem(0.35, viewport))
-        // Collapsed, the pill hugs the icon; expanded, it runs the width of the
-        // panel. The real client does this by laying the pill out at its full
-        // width and scaling it in X — the visible result is the same, and
-        // sizing it directly avoids a transform that would also squash the icon.
-        .frame(width: isExpanded ? nil : Theme.Metrics.railCollapsed(viewport)
-                                        - Theme.Metrics.rem(1.4, viewport),
-               alignment: .leading)
-        .frame(maxWidth: isExpanded ? .infinity : nil, alignment: .leading)
+        // Sized from the icon box outward, so the collapsed indicator is a
+        // circle that wraps the glyph rather than a rectangle cropped by the
+        // rail's edge.
+        .frame(width: width, height: iconBox, alignment: .leading)
+        .clipped()
+        // A rounded square collapsed, a rounded rectangle expanded — the shape
+        // the real client uses. A capsule reads as a pill button and looked
+        // wrong around a single glyph.
         .background {
-            // Selection is a flat pill; focus is glass. Drawing them differently
-            // is how the real client shows "you are on Home" and "your cursor is
-            // here" at the same time.
             if isSelected && !isFocused {
-                RoundedRectangle(cornerRadius: Theme.Metrics.railPillCorner(viewport))
-                    .fill(Theme.control.opacity(0.7))
+                RoundedRectangle(cornerRadius: Theme.Metrics.railPillCorner(viewport),
+                                 style: .continuous)
+                    .fill(Theme.control.opacity(0.75))
             }
         }
-        // `.glassEffect(.identity, …)` rather than conditionally applying the
-        // modifier: an `if` gives the two branches different structural identity,
-        // which destroys the morph. `identity` is the documented no-op variant,
-        // so the shape keeps one identity and travels between rows.
-        .glassEffect(isFocused ? .regular.tint(.white.opacity(0.18)).interactive() : .identity,
+        .glassEffect(isFocused ? .regular.tint(.white.opacity(0.20)).interactive() : .identity,
                      in: .rect(cornerRadius: Theme.Metrics.railPillCorner(viewport)))
         .glassEffectID("rail.selection", in: glass)
+        .padding(.leading, iconLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

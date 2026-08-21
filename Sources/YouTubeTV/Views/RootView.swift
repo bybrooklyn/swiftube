@@ -41,6 +41,11 @@ struct RootView: View {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
+                if let settings = model.settings {
+                    SettingsView(model: settings)
+                        .zIndex(3)
+                }
+
                 if model.isSigningIn {
                     SignInView(auth: model.auth) { model.finishSignIn() }
                         .zIndex(2)

@@ -45,6 +45,10 @@ final class AppModel {
     let browse: BrowseViewModel
 
     let auth = AuthService()
+    let settingsStore = SettingsStore()
+
+    /// Non-nil while the settings surface is up. Modal, like the player.
+    private(set) var settings: SettingsModel?
 
     private(set) var focus: BrowseFocus = .card(shelf: 0, index: 0)
     private(set) var isRailExpanded = false
@@ -113,19 +117,37 @@ final class AppModel {
     var isLoading: Bool { browse.isLoading && browse.videoGroups.isEmpty }
 
     func start() {
-        // A test seam, not a feature: sign-in is otherwise only reachable by
-        // navigating the guide, which makes it impossible to verify without
-        // synthetic key events — and those proved unreliable enough to produce
-        // phantom presses.
-        //   YOUTUBETV_SIGNIN=1 open build/YouTube.app
-        if ProcessInfo.processInfo.environment["YOUTUBETV_SIGNIN"] != nil {
-            isSigningIn = true
+        // A test seam, not a feature. Screens are otherwise only reachable by
+        // navigating with a controller, which makes them impossible to verify
+        // without synthetic key events — and those proved unreliable enough to
+        // deliver phantom presses to the wrong app.
+        //   YOUTUBETV_STATE=guide|signin|settings open build/YouTube.app
+        switch ProcessInfo.processInfo.environment["YOUTUBETV_STATE"] {
+        case "signin":   isSigningIn = true
+        case "guide":    focus = .rail(.home); isRailExpanded = true
+        case "settings": open(.settings)
+        default:         break
         }
         input.start { [weak self] intent in
             self?.handle(intent)
         }
-        browse.loadContent(source: "AppModel.start")
-        Task { await loadGuideChannels() }
+
+        // Push the stored token into the API *before* the first fetch.
+        //
+        // AuthService restores the session from the Keychain in its own init,
+        // so the account avatar appeared — but nothing had told InnerTubeAPI,
+        // VideoPreloadCache or the player about it. The feed was therefore
+        // fetched unauthenticated on every launch, came back empty, and fell
+        // back to a plain "popular" search. Only signing in *during* a session
+        // ever applied the token.
+        Task {
+            if auth.isSignedIn {
+                await applyAuthChange()
+            } else {
+                browse.loadContent(source: "AppModel.start")
+                await loadGuideChannels()
+            }
+        }
     }
 
     /// Populates the guide's channel list. Signed in this is the real
@@ -162,9 +184,16 @@ final class AppModel {
             return
         }
 
-        // Bail *before* mutating anything. Search, Podcasts and Settings have no
-        // section to load yet; moving the selection highlight and clearing the
-        // channel feed for them silently reverted the visible feed to Home while
+        if item == .settings {
+            selectedRailItem = item
+            memory.railItem = item
+            openSettings()
+            return
+        }
+
+        // Bail *before* mutating anything. Search and Podcasts have no section
+        // to load yet; moving the selection highlight and clearing the channel
+        // feed for them silently reverted the visible feed to Home while
         // claiming a different entry was selected.
         guard let name = item.sectionTypeName,
               let type = BrowseSection.SectionType(rawValue: name) else { return }
@@ -182,6 +211,24 @@ final class AppModel {
         memory = BrowseNavigator.ColumnMemory()
         memory.railItem = item
         isRailExpanded = false
+    }
+
+    func openSettings() {
+        isRailExpanded = false
+        settings = SettingsModel(store: settingsStore, auth: auth) { [weak self] in
+            // Sign-in replaces settings rather than stacking on top of it.
+            self?.settings = nil
+            self?.isSigningIn = true
+        }
+    }
+
+    private func closeSettings() {
+        settings = nil
+        // Settings changes affect playback, so hand the new values to the
+        // player the next time one is created — and to any that is live now.
+        player?.playback.updateSettings(settingsStore.settings)
+        focus = .rail(.settings)
+        isRailExpanded = true
     }
 
     private func loadChannel(_ channelId: String) async {
@@ -225,6 +272,7 @@ final class AppModel {
         player?.playback.updateAuthToken(token)
         player?.playback.updateSAPISID(sapisid)
 
+        // BrowseViewModel reloads its content when the token changes.
         await browse.updateAuthToken(token)
         await loadGuideChannels()
     }
@@ -238,6 +286,16 @@ final class AppModel {
             if intent == .back {
                 auth.cancelSignIn()
                 finishSignIn()
+            }
+            return
+        }
+
+        if let settings {
+            switch intent {
+            case let .move(direction): settings.move(direction)
+            case .select:              settings.select()
+            case .back:                closeSettings()
+            default:                   break
             }
             return
         }
@@ -355,6 +413,7 @@ final class AppModel {
 
     private func present(_ video: Video) {
         let model = PlayerModel(api: api)
+        model.playback.updateSettings(settingsStore.settings)
         // The player keeps its own `hasAuthToken` mirror; setting the token on
         // the shared API is not enough to arm the authenticated stream paths.
         model.playback.updateAuthToken(auth.accessToken)
