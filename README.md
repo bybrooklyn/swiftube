@@ -18,8 +18,8 @@ a pipeline ported from [SmartTubeIOS](https://github.com/bybrooklyn/SmartTubeIOS
   full-screen player, laid out from measurements taken off the real client
   rather than approximated. Every metric is a fraction of the viewport, so the
   proportions hold from a 1280-wide window up to a 4K television.
-- **Playback** through `AVPlayer`, with adaptive formats, an HLS fallback chain,
-  captions, playback speed, and audio-track selection.
+- **Playback** through `AVPlayer` at 1080p, over token-free HLS, with captions,
+  playback speed, audio-track selection, and an up-next rail that autoplays.
 - **SponsorBlock**, per category, each set to skip / toast / off.
 - **DeArrow** titles where available.
 - **Sign-in** over the OAuth device-code flow — no password is typed into the
@@ -116,8 +116,10 @@ without surfaces, comments are one page with no continuation, and channel pages
 show uploads rather than tabs for playlists. `CLAUDE.md` has the playback traps
 worth reading before touching that pipeline.
 
-**Signed out, YouTube returns an empty home feed**, and the app falls back to a
-plain "popular" search — so if the shelves look generic, run `just signin`.
+**Signed out, YouTube returns an empty home feed.** The app then builds home
+from five of YouTube's own category feeds, so it is still a real multi-shelf
+surface — but recommendations are per-account and there is no signed-out
+equivalent, so run `just signin` to get yours.
 
 ## Tests
 
@@ -125,7 +127,7 @@ plain "popular" search — so if the shelves look generic, run `just signin`.
 just test
 ```
 
-825 tests. `--no-parallel` is load-bearing: the suites inherited from
+831 tests. `--no-parallel` is load-bearing: the suites inherited from
 SmartTubeIOS share global singletons and fail randomly when run concurrently.
 
 ## Licence
