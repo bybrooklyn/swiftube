@@ -39,8 +39,9 @@ public enum RailItem: Hashable, Sendable {
         case .live:          "live"
         case .news:          "news"
         case .sports:        "sports"
-        // Podcasts has no InnerTube browse id of its own; the real client maps
-        // it to a search, which the Core layer does not expose as a section.
+        // Podcasts has no InnerTube browse id of its own — `FEpodcasts` is not
+        // valid, the same way `FEnews` is not (see fetchNews). It is served by a
+        // search instead, handled in AppModel.open.
         case .podcasts:      nil
         case .account, .search, .settings, .channel: nil
         }

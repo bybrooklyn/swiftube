@@ -25,12 +25,11 @@ struct GuideRail: View {
     let channels: [Channel]
     let accountName: String?
     let accountAvatarURL: URL?
+    /// The guide is navigable with the pointer as well as the d-pad.
+    var onHover: (RailItem) -> Void = { _ in }
+    var onSelect: (RailItem) -> Void = { _ in }
 
     @Environment(\.viewportSize) private var viewport
-
-    /// Namespace for the Liquid Glass highlight, so it travels between entries
-    /// rather than fading out in one place and in at another.
-    @Namespace private var glass
 
     private var focusedItem: RailItem? {
         if case let .rail(item) = focus { return item }
@@ -45,21 +44,26 @@ struct GuideRail: View {
     }
 
     var body: some View {
+        // No `GlassEffectContainer` here. It only earns its cost when its
+        // children actually apply `.glassEffect`, and none of these do — the
+        // selection shape is a flat `#F1F1F1` fill, because that is what the
+        // real guide draws. An empty container is a render pass for nothing.
         GeometryReader { geo in
-            GlassEffectContainer(spacing: Theme.Metrics.rem(0.2, viewport)) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        if needsDividerBefore(item) { divider }
-                        row(for: item)
-                            .frame(height: Theme.Metrics.railItemHeight(viewport))
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    if needsDividerBefore(item) { divider }
+                    row(for: item)
+                        .frame(height: Theme.Metrics.railItemHeight(viewport))
+                        .contentShape(.rect)
+                        .onHover { inside in if inside { onHover(item) } }
+                        .onTapGesture { onSelect(item) }
                 }
-                .offset(y: scrollOffset(in: geo.size))
-                .animation(Theme.travel, value: focusedItem)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.vertical, Theme.Metrics.rem(2.4, viewport))
-                .clipped()
             }
+            .offset(y: scrollOffset(in: geo.size))
+            .animation(Theme.travel, value: focusedItem)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.vertical, Theme.Metrics.rem(2.4, viewport))
+            .clipped()
         }
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -106,19 +110,18 @@ struct GuideRail: View {
                     .padding(.leading, isExpanded
                              ? Theme.Metrics.railPillLeading(viewport)
                              : iconCentre - pillHeight / 2)
-                    .glassEffectID("rail.selection", in: glass)
             }
 
-            icon(for: item, size: Theme.Metrics.railIconSize(viewport))
-                .frame(width: Theme.Metrics.railIconSize(viewport) * 1.6,
-                       height: Theme.Metrics.railIconSize(viewport) * 1.6)
+            icon(for: item, size: Theme.Metrics.railIconSize(viewport), isHighlighted: isHighlighted)
+                .frame(width: Theme.Metrics.railIconSize(viewport),
+                       height: Theme.Metrics.railIconSize(viewport))
                 .position(x: iconCentre, y: Theme.Metrics.railItemHeight(viewport) / 2)
 
             // Always laid out, revealed by the guide's width — inserting it
             // would re-lay-out the stack and make the icons jump.
             Text(label(for: item))
                 .font(.system(size: Theme.Metrics.railLabelSize(viewport),
-                              weight: .regular))
+                              weight: .semibold))
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.leading, labelLeading)
@@ -166,7 +169,7 @@ struct GuideRail: View {
     }
 
     @ViewBuilder
-    private func icon(for item: RailItem, size: CGFloat) -> some View {
+    private func icon(for item: RailItem, size: CGFloat, isHighlighted: Bool) -> some View {
         switch item {
         case .account:
             AvatarView(url: accountAvatarURL, fallbackSymbol: "person.crop.circle",
@@ -176,8 +179,32 @@ struct GuideRail: View {
                        fallbackSymbol: "person.circle",
                        size: Theme.Metrics.avatarSize(viewport))
         default:
-            Image(systemName: symbol(for: item))
-                .font(.system(size: size, weight: .regular))
+            if let glyph = Self.glyph(for: item) {
+                GuideIcon(glyph: glyph,
+                          // The section you are actually in is drawn solid.
+                          isCurrent: selected == item,
+                          size: size,
+                          tint: isHighlighted ? Theme.canvas : Theme.textPrimary,
+                          background: isHighlighted ? Theme.focusRing : Theme.canvas)
+            }
+        }
+    }
+
+    private static func glyph(for item: RailItem) -> GuideGlyph? {
+        switch item {
+        case .search:        .search
+        case .home:          .home
+        case .shorts:        .shorts
+        case .subscriptions: .subscriptions
+        case .library:       .library
+        case .music:         .music
+        case .gaming:        .gaming
+        case .live:          .live
+        case .news:          .news
+        case .podcasts:      .podcasts
+        case .sports:        .sports
+        case .settings:      .settings
+        case .account, .channel: nil
         }
     }
 
@@ -199,27 +226,6 @@ struct GuideRail: View {
         case .settings:      "Settings"
         }
     }
-
-    /// Outline symbols, not the `.fill` variants — the real guide's icons are
-    /// thin strokes.
-    private func symbol(for item: RailItem) -> String {
-        switch item {
-        case .account:       "person.crop.circle"
-        case .search:        "magnifyingglass"
-        case .home:          "house"
-        case .shorts:        "play.rectangle.on.rectangle"
-        case .channel:       "person.circle"
-        case .subscriptions: "play.square.stack"
-        case .library:       "rectangle.stack"
-        case .music:         "music.note"
-        case .gaming:        "gamecontroller"
-        case .live:          "dot.radiowaves.left.and.right"
-        case .news:          "newspaper"
-        case .podcasts:      "mic"
-        case .sports:        "trophy"
-        case .settings:      "gearshape"
-        }
-    }
 }
 
 /// A circular avatar with a symbol fallback while it loads or when there is none.
@@ -231,7 +237,9 @@ struct AvatarView: View {
     var body: some View {
         Group {
             if let url {
-                ThumbnailView(url: url)
+                // An avatar is drawn at a couple of dozen points; decoding the
+                // channel's full-size image for it wastes memory and a decode.
+                ThumbnailView(url: url, maxPixel: 160)
             } else {
                 Image(systemName: fallbackSymbol)
                     .font(.system(size: size * 0.8, weight: .regular))

@@ -1,97 +1,130 @@
 # SwifTube
 
-A native SwiftUI YouTube client for macOS that looks and behaves like the
-**YouTube app on TVs and consoles**, rendered in Liquid Glass, dark only, and
-launchable as a tile in your Steam library with a controller.
+A native macOS client for YouTube's **leanback** interface — the ten-foot UI
+that ships on televisions and consoles — built in SwiftUI and designed to be
+launched from Steam like a game.
 
-Not affiliated with YouTube or Google.
+It is not a wrapper around the website. Browsing, search, playback, captions,
+quality selection and SponsorBlock all run against InnerTube directly, through
+a pipeline ported from [SmartTubeIOS](https://github.com/bybrooklyn/SmartTubeIOS).
 
-## Attribution
+<sub>Not affiliated with, endorsed by, or sponsored by YouTube or Google LLC.</sub>
 
-SwifTube is a derivative work of
-**[SmartTubeIOS](https://github.com/bybrooklyn/SmartTubeIOS)** by Milika Delic and
-contributors, itself inspired by
-[SmartTube](https://github.com/yuliskov/SmartTube) for Android. It is licensed
-**GPL-3.0**, the same as its parent — see [LICENSE](LICENSE).
+---
 
-This repository was started from a squashed snapshot rather than a fork, so the
-upstream commit history is not present here. Everything under
-`Sources/YouTubeCore/` and most of `Sources/YouTubeMedia/` originates from that
-project — the InnerTube client, BotGuard/PO-token handling, HLS extraction, the
-n-descrambler, SponsorBlock and DeArrow integration, the OAuth device-code flow,
-and the AVPlayer loading pipeline. `Sources/YouTubeTV/` is new work: the
-leanback UI, focus engine and controller input.
+## What it does
 
-```bash
-just setup-signing   # once — keeps the Keychain trusting the app across rebuilds
-just app             # build build/YouTube.app
-just open-app        # run it
-just steam           # add it to Steam (quit Steam first)
+- **The leanback surface.** Guide rail, shelves, search, settings, and a
+  full-screen player, laid out from measurements taken off the real client
+  rather than approximated. Every metric is a fraction of the viewport, so the
+  proportions hold from a 1280-wide window up to a 4K television.
+- **Playback** through `AVPlayer`, with adaptive formats, an HLS fallback chain,
+  captions, playback speed, and audio-track selection.
+- **SponsorBlock**, per category, each set to skip / toast / off.
+- **DeArrow** titles where available.
+- **Sign-in** over the OAuth device-code flow — no password is typed into the
+  app and nothing touches the Keychain.
+- **Steam integration** — an installer that registers the app as a
+  non-Steam game with generated artwork.
+
+## Requirements
+
+macOS 26 or newer. **Xcode is not required** and is not used: the project builds
+with the Command Line Tools via SwiftPM, and `Scripts/build-app.sh` assembles
+the `.app` by hand.
+
+## Getting started
+
+```sh
+just setup-signing   # once — a stable signing identity
+just app             # build the bundle into build/YouTube.app
+just signin          # OAuth device code; approve it in a browser
+just open-app        # launch
 ```
 
-## What this is
+`just setup-signing` is not optional. Ad-hoc signing hashes the binary into the
+identity, so every rebuild would look like a different app and you would have to
+sign in again each time.
 
-The upstream project is a mature iOS/tvOS YouTube client. Its value is the half
-that is *not* UI — InnerTube, BotGuard/PO tokens, HLS extraction, the
-n-descrambler, SponsorBlock, DeArrow, OAuth — and it already talks to YouTube as
-the `TVHTML5` client, so the feed arrives in the shape the console app receives.
-That half is kept. The iOS view layer is replaced with a 10-foot one.
+To run in a window instead of taking over the display:
 
-```
-Sources/YouTubeCore/    Models, InnerTube API, SponsorBlock, caches. Foundation only.
-Sources/YouTubeMedia/   Auth, BotGuard, HLS extraction, AVPlayer pipeline. Ported to macOS.
-Sources/YouTubeTV/      The leanback UI: guide rail, shelves, player, focus engine, input.
+```sh
+YOUTUBETV_WINDOWED=1 open build/YouTube.app
 ```
 
-## Building
+### Steam
 
-**Xcode is not required and is not used.** Everything builds with the macOS
-Command Line Tools via SwiftPM, and `Scripts/build-app.sh` assembles the `.app`
-by hand. Two consequences are worth knowing before you write UI code here:
+```sh
+just steam           # build and register as a non-Steam game
+just steam-remove    # undo
+```
 
-- **`#Preview` and `@Entry` do not work.** Their macro plugins ship with Xcode,
-  not the CLT. (`@Observable` is fine — `libObservationMacros.dylib` does ship.)
-  Every UI change therefore costs a `just app` + launch cycle.
-- **`swift test` needs extra flags.** Swift Testing lives in
-  `/Library/Developer/CommandLineTools/Library/Developer/Frameworks`, outside the
-  default search path, and the `_Testing_Foundation` cross-import overlay is
-  present but has an empty `Modules` directory, so any test importing both
-  `Foundation` and `Testing` fails to build without
-  `-disable-cross-import-overlay-search`. `just test` has all of this baked in;
-  use it rather than bare `swift test`.
+## Controls
 
-Requires macOS 26+ (Liquid Glass) on Apple Silicon.
+Designed for a d-pad first; the keyboard mirrors it, and the pointer works too.
 
-## Navigation
+| Action | Key |
+|---|---|
+| Move | Arrow keys |
+| Select | Return |
+| Back | Escape / Delete |
+| Play / pause | Space or `K` |
+| Seek | `J` / `L` |
+| Player menu | `M` |
+| Quit | ⌘Q |
 
-Focus is **not** SwiftUI's focus engine. `Sources/YouTubeTV/Focus/` holds a pure
-value-type navigator, so the rules that make a TV UI feel right are pinned by
-unit tests rather than by eye:
+Back retraces where you have been: it leaves the guide for the content behind
+it, returns from a section to the previous one, and opens the guide from home.
 
-- Pressing **left on the first card opens the guide** — it does not just stop.
-- **Each shelf remembers its own column.** Coming back to a row finds it where
-  you left it, rather than reset to the start.
-- Vertical movement **skips shelves that have not loaded yet**.
-- Rows and cards **park at fixed anchors** (a third down the screen, a fixed
-  inset from the left). Content moves to meet the focus, never the reverse.
+The pointer moves focus on hover and activates on click — it drives the same
+focus state the d-pad does rather than running a second selection model
+alongside it. The window's close / minimise / zoom buttons are hidden until the
+pointer reaches the top-left corner.
 
-Controls: see [Resources/steam/CONTROLLER.md](Resources/steam/CONTROLLER.md).
-Both a native gamepad and keyboard drive the same intent stream, which is what
-makes any Steam Input layout work.
+Many Steam Input templates emit keystrokes rather than a virtual gamepad, so
+both paths are supported and any layout works without configuration.
+
+## How it is put together
+
+| Target | Role |
+|---|---|
+| `YouTubeCore` | InnerTube API, models, browse view models |
+| `YouTubeMedia` | Auth, BotGuard/PO tokens, stream resolution, playback |
+| `YouTubeTV` | The leanback UI |
+
+`YouTubeCore` and `YouTubeMedia` are kept close to upstream so fixes still
+cherry-pick when YouTube changes something. Changes there are deliberately
+minimal and commented.
+
+Two conventions in the UI worth knowing:
+
+- **Focus logic lives in `Sources/YouTubeTV/Focus/`**, as pure functions over
+  value types, with tests. Views render focus; they never decide where it goes.
+- **The guide's icons are drawn as paths**, not SF Symbols
+  (`Views/GuideIcons.swift`). YouTube's guide uses its own glyph set — the
+  Shorts mark, the Music ring, the Library stack, the Gaming heart — and no SF
+  Symbol comes close enough.
 
 ## Status
 
-Working: the browse surface (home shelves against the live feed), the focus
-engine, gamepad and keyboard input, the guide rail, and the player's chrome —
-title, scrubber, glass transport row, auto-hide.
+Browsing, search, settings, sign-in, the guide, the player and its menu all
+work. Feature parity with the real client is not complete; the gaps are listed
+in `CLAUDE.md` alongside the traps worth knowing before changing the build or
+the playback pipeline.
 
-**Playback does not resolve a stream yet.** YouTube currently returns
-cipher-protected URLs to every unauthenticated client and answers others with
-"Sign in to confirm you're not a bot". The device-code OAuth flow exists in
-`YouTubeMedia/Services/AuthService*` but is not yet wired to a sign-in screen;
-that is the next piece of work and the most likely fix. See AGENTS.md for the
-three defects already fixed along that path and what the logs show.
+**Signed out, YouTube returns an empty home feed**, and the app falls back to a
+plain "popular" search — so if the shelves look generic, run `just signin`.
 
-Not built yet: sign-in UI, Search, Subscriptions, Shorts, Library, Settings,
-and the quality/captions/more picker overlays (their controllers already exist
-on `PlaybackViewModel`).
+## Tests
+
+```sh
+just test
+```
+
+825 tests. `--no-parallel` is load-bearing: the suites inherited from
+SmartTubeIOS share global singletons and fail randomly when run concurrently.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE), which also carries the upstream notice for the
+SmartTube-derived code.

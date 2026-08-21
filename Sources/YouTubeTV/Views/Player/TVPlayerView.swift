@@ -36,6 +36,12 @@ struct TVPlayerView: View {
                 overlay.transition(.opacity)
             }
 
+            if let menu = model.menu {
+                PlayerMenuView(model: menu)
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
+
             // Shown independently of the controls: a skip prompt is useless if
             // it only appears while the transport happens to be up.
             if let segment = model.playback.currentToastSegment {
@@ -45,6 +51,7 @@ struct TVPlayerView: View {
         }
         .animation(Theme.travel, value: model.areControlsVisible)
         .animation(Theme.stateChange, value: model.playback.currentToastSegment)
+        .animation(Theme.stateChange, value: model.menu == nil)
     }
 
     /// The SponsorBlock prompt, for categories set to "show toast" rather than
@@ -143,35 +150,12 @@ struct TVPlayerView: View {
                 .padding(.bottom, rem(0.5))
             transportRow
         }
-        // KNOWN ISSUE: the scrubber still overruns the right edge and the
-        // transport's right-hand cluster lands off-screen. The cause is that a
-        // ZStack sizes to its largest child and the shelves behind the player
-        // are far wider than the window, so the proposal reaching here is too
-        // wide. Deriving an explicit width from `viewport` instead was worse —
-        // it measures zero on the first layout pass and the whole overlay
-        // vanishes. The real fix is to stop the shelves inflating the root's
-        // layout size (clipping does not change it), which is a change to
-        // ShelfListView, not here.
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, inset)
         .padding(.bottom, inset)
     }
 
-    /// Current position with the chapter name, and the total duration opposite —
-    /// the chapter name is what makes long videos navigable on a TV.
-    private var timeline: some View {
-        HStack {
-            Text(model.positionLabel)
-                .padding(.horizontal, rem(0.2))
-                .background(Color.black)
-            Spacer()
-            Text(formatDuration(model.playback.duration))
-                .padding(.horizontal, rem(0.2))
-                .background(Color.black)
-        }
-        .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .medium))
-        .foregroundStyle(Theme.textPrimary)
-    }
+    private var timeline: some View { TimelineLabels(model: model) }
 
     private var transportRow: some View {
         ZStack {
@@ -270,7 +254,36 @@ struct TVPlayerView: View {
     }
 }
 
-// MARK: - Scrubber
+// MARK: - Per-tick views
+
+/// Current position with the chapter name, and the total duration opposite —
+/// the chapter name is what makes long videos navigable on a TV.
+///
+/// Its own `View` rather than a computed property on `TVPlayerView` for a
+/// reason that matters: with `@Observable`, whichever body *reads*
+/// `playback.currentTime` is the body that gets invalidated when it changes.
+/// Read inline, that was `TVPlayerView.body` — so the title, the metadata, the
+/// whole transport row and both glass pills were rebuilt ten times a second
+/// while a video played, for a label that is the only thing that changed.
+private struct TimelineLabels: View {
+
+    @Bindable var model: PlayerModel
+    @Environment(\.viewportSize) private var viewport
+
+    var body: some View {
+        HStack {
+            Text(model.positionLabel)
+                .padding(.horizontal, Theme.Metrics.rem(0.2, viewport))
+                .background(Color.black)
+            Spacer()
+            Text(formatDuration(model.playback.duration))
+                .padding(.horizontal, Theme.Metrics.rem(0.2, viewport))
+                .background(Color.black)
+        }
+        .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .medium))
+        .foregroundStyle(Theme.textPrimary)
+    }
+}
 
 /// The progress bar: white played portion, chapter tick marks, and SponsorBlock
 /// segments coloured in place.

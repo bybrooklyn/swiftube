@@ -35,10 +35,14 @@ struct RootView: View {
                           selected: model.selectedRailItem,
                           channels: model.guideChannels,
                           accountName: model.auth.accountName,
-                          accountAvatarURL: model.auth.accountAvatarURL)
+                          accountAvatarURL: model.auth.accountAvatarURL,
+                          onHover: { model.hover(rail: $0) },
+                          onSelect: { model.click(rail: $0) })
 
                 if model.isLoading {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let empty = model.emptyState {
+                    SurfaceMessage(title: empty.title, detail: empty.detail, symbol: empty.symbol)
                 }
 
                 if let search = model.search {
@@ -62,6 +66,7 @@ struct RootView: View {
                         .zIndex(1)
                 }
             }
+            .overlay(alignment: .topLeading) { TrafficLights() }
             // Pinned to the window, and clipped.
             //
             // A ZStack takes the size of its largest child, and the shelf rows

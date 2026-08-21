@@ -298,6 +298,55 @@ public final class BrowseViewModel {
         }
     }
 
+    /// The home feed for a signed-out session.
+    ///
+    /// Signed out, `FEwhat_to_watch` comes back empty — YouTube has no
+    /// recommendations to give without an identity. The fallback used to be a
+    /// single `search("popular")`, which is why the app showed one row of
+    /// generic results and called it home.
+    ///
+    /// These are YouTube's own category feeds instead: real, editorially
+    /// populated shelves with real names, fetched concurrently so the whole
+    /// feed costs about as long as its slowest row. It is not a substitute for
+    /// signing in — `isAuthRequired` is still set, and the UI says so — but it
+    /// is a genuine multi-shelf home rather than a search result.
+    private static func signedOutHome(api: any InnerTubeAPIProtocol) async -> [VideoGroup] {
+        let sources: [(String, @Sendable () async throws -> VideoGroup)] = [
+            ("Trending", { try await api.fetchLive() }),
+            ("Music",    { try await api.fetchMusic() }),
+            ("Gaming",   { try await api.fetchGaming() }),
+            ("News",     { try await api.fetchNews() }),
+            ("Sports",   { try await api.fetchSports() }),
+        ]
+
+        var rows = await withTaskGroup(of: (Int, VideoGroup?).self) { group in
+            for (index, source) in sources.enumerated() {
+                group.addTask {
+                    (index, try? await source.1())
+                }
+            }
+            var collected: [(Int, VideoGroup)] = []
+            for await (index, result) in group {
+                if let result, !result.videos.isEmpty { collected.append((index, result)) }
+            }
+            // The task group finishes out of order; the shelves must not.
+            return collected.sorted { $0.0 < $1.0 }.map { index, row -> VideoGroup in
+                var copy = row
+                copy.title = sources[index].0
+                copy.layout = .row
+                return copy
+            }
+        }
+
+        // The same video turns up in several category feeds; keep its first
+        // appearance so no shelf repeats what the one above it already showed.
+        var seen = Set<String>()
+        for index in rows.indices {
+            rows[index].videos = rows[index].videos.filter { seen.insert($0.id).inserted }
+        }
+        return rows.filter { !$0.videos.isEmpty }
+    }
+
     private func fetchSectionBody(_ section: BrowseSection) async throws {
         switch section.type {
 
@@ -306,10 +355,7 @@ public final class BrowseViewModel {
                 if !Task.isCancelled {
                     if rows.flatMap({ $0.videos }).isEmpty {
                         isAuthRequired = true
-                        let popular = try await api.search(query: "popular")
-                        var deduped = popular
-                        deduped.videos = deduplicated(popular.videos)
-                        videoGroups = [deduped]
+                        videoGroups = await Self.signedOutHome(api: api)
                     } else {
                         isAuthRequired = false
                         // Dedup within each row — YouTube can return the same video ID

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftUI
@@ -75,6 +76,7 @@ final class AppModel {
     }
 
     var shelves: [Shelf] {
+        if !customShelves.isEmpty { return customShelves }
         if let channelFeed { return [channelFeed] }
 
         // A category surface returns exactly one group, and its title is
@@ -131,7 +133,25 @@ final class AppModel {
         return items
     }
 
-    var isLoading: Bool { browse.isLoading && browse.videoGroups.isEmpty }
+    var isLoading: Bool { browse.isLoading && browse.videoGroups.isEmpty && channelFeed == nil }
+
+    /// Non-nil when the current surface has nothing to show, and why.
+    ///
+    /// Several surfaces legitimately return nothing — Subscriptions and Library
+    /// need an account, a category can come back empty — and rendering that as a
+    /// blank page reads as a broken app. `BrowseViewModel.isAuthRequired` already
+    /// distinguishes the two cases and was never read.
+    var emptyState: (title: String, detail: String, symbol: String)? {
+        guard !isLoading, shelves.allSatisfy(\.videos.isEmpty) else { return nil }
+        if browse.isAuthRequired && !auth.isSignedIn {
+            return ("Sign in to see this",
+                    "\(browse.currentSection.title) needs your YouTube account.\nChoose your avatar at the top of the guide to sign in.",
+                    "person.crop.circle")
+        }
+        return ("Nothing here yet",
+                "\(browse.currentSection.title) came back empty.",
+                "tray")
+    }
 
     func start() {
         // A test seam, not a feature. Screens are otherwise only reachable by
@@ -192,10 +212,23 @@ final class AppModel {
     /// Every category in the guide maps onto a `BrowseSection.SectionType` that
     /// `BrowseViewModel` already knows how to fetch, so selecting Music or
     /// Gaming loads a real feed rather than only moving a highlight.
-    private func open(_ item: RailItem) {
+    /// Sections visited, so Back retraces them. Search and Settings are
+    /// overlays rather than sections and are deliberately not recorded.
+    @ObservationIgnored private var sectionHistory: [RailItem] = []
+
+    private func open(_ item: RailItem, recordingHistory: Bool = true) {
+        if recordingHistory, item != selectedRailItem,
+           item != .search, item != .settings {
+            sectionHistory.append(selectedRailItem)
+            // A guide has a dozen entries and a session can wander; keep the
+            // trail short enough that Back stays predictable.
+            if sectionHistory.count > 16 { sectionHistory.removeFirst() }
+        }
+
         if case let .channel(id) = item {
             selectedRailItem = item
             memory.railItem = item
+            customShelves = []
             // Channel pages are their own surface; until that exists, show the
             // channel's uploads in the feed rather than doing nothing.
             Task { await loadChannel(id) }
@@ -214,6 +247,27 @@ final class AppModel {
             return
         }
 
+        // Podcasts has no browse id, so it is a search — the same approach
+        // fetchNews already takes for its own missing browseId. Without this the
+        // entry did nothing at all: sectionTypeName is nil, so `open` fell
+        // through the guard below and the screen never changed.
+        if item == .podcasts {
+            selectedRailItem = item
+            memory.railItem = item
+            isRailExpanded = false
+            Task { await loadSearchSurface(query: "podcast", title: "Podcasts") }
+            return
+        }
+
+        // Library is history + playlists + downloads, not playlists alone.
+        if item == .library {
+            selectedRailItem = item
+            memory.railItem = item
+            isRailExpanded = false
+            Task { await loadLibrary() }
+            return
+        }
+
         // Bail *before* mutating anything. Search and Podcasts have no section
         // to load yet; moving the selection highlight and clearing the channel
         // feed for them silently reverted the visible feed to Home while
@@ -223,6 +277,7 @@ final class AppModel {
 
         selectedRailItem = item
         channelFeed = nil
+        customShelves = []
         browse.select(section: BrowseSection(id: type.rawValue,
                                              title: type.defaultTitle,
                                              type: type))
@@ -266,6 +321,54 @@ final class AppModel {
         focus = .rail(.settings)
         isRailExpanded = true
     }
+
+    /// A surface backed by a search rather than a browse id.
+    private func loadSearchSurface(query: String, title: String) async {
+        customShelves = []
+        guard let group = try? await api.search(query: query, continuationToken: nil, filter: .default) else { return }
+        customShelves = [Shelf(id: "search-\(query)", title: title, videos: group.videos)]
+        focus = .card(shelf: 0, index: 0)
+        memory = BrowseNavigator.ColumnMemory()
+        memory.railItem = selectedRailItem
+    }
+
+    /// Library: three shelves, matching what the real client keeps there.
+    ///
+    /// The guide entry used to map to `SectionType.playlists`, so it showed only
+    /// playlists — no history, no downloads. Each part is fetched independently
+    /// and an empty one is simply omitted rather than showing an empty row.
+    private func loadLibrary() async {
+        customShelves = []
+        var shelves: [Shelf] = []
+
+        if let history = try? await api.fetchHistory(), !history.videos.isEmpty {
+            shelves.append(Shelf(id: "lib-history", title: "History", videos: history.videos))
+        }
+        if let playlists = try? await api.fetchUserPlaylists(), !playlists.isEmpty {
+            let videos = playlists.map { playlist in
+                Video(id: playlist.id,
+                      title: playlist.title,
+                      channelTitle: playlist.videoCount.map { "\($0) videos" } ?? "",
+                      thumbnailURL: playlist.thumbnailURL,
+                      playlistId: playlist.id)
+            }
+            shelves.append(Shelf(id: "lib-playlists", title: "Playlists", videos: videos))
+        }
+        let downloads = DownloadStore.shared.entries
+        if !downloads.isEmpty {
+            shelves.append(Shelf(id: "lib-downloads", title: "Downloads",
+                                 videos: downloads.map(\.video)))
+        }
+
+        customShelves = shelves
+        focus = .card(shelf: 0, index: 0)
+        memory = BrowseNavigator.ColumnMemory()
+        memory.railItem = .library
+    }
+
+    /// Shelves assembled here rather than by BrowseViewModel — Library and the
+    /// search-backed categories have no single browse section behind them.
+    private var customShelves: [Shelf] = []
 
     private func loadChannel(_ channelId: String) async {
         guard let (channel, group) = try? await api.fetchChannel(channelId: channelId) else { return }
@@ -316,6 +419,13 @@ final class AppModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
+        // Any key press re-anchors the pointer. Expanding the guide shifts the
+        // shelves right under a stationary cursor, and SwiftUI then fires
+        // `.onHover` for whichever card slid beneath it — which pulled focus
+        // straight back out of the guide. Hover only counts once the pointer
+        // has physically moved since the last key press.
+        pointerAnchor = NSEvent.mouseLocation
+
         // Sign-in is modal, but it must still hear Back — swallowing every
         // intent here left the screen with no way out.
         if isSigningIn {
@@ -365,6 +475,7 @@ final class AppModel {
             }
             loadMoreIfNearRowEnd()
             prefetchFocusedVideo()
+            prefetchThumbnails()
 
         case .select:
             switch focus {
@@ -380,9 +491,25 @@ final class AppModel {
             }
 
         case .back:
-            // From content, back opens the guide — the same affordance as
-            // pressing left at the start of a row.
-            guard !focus.isInRail else { return }
+            // Back was a no-op from the guide and never left a section, so
+            // Escape appeared dead once you had opened anything.
+            if focus.isInRail {
+                // From the guide, back returns to the content behind it.
+                withAnimation(Theme.stateChange) {
+                    focus = memory.contentFocus ?? BrowseNavigator.defaultContentFocus(layout: layout)
+                    isRailExpanded = false
+                }
+                return
+            }
+
+            // From a section, back returns to the one before it.
+            if let previous = sectionHistory.popLast() {
+                open(previous, recordingHistory: false)
+                return
+            }
+
+            // From home, back opens the guide — the same affordance as pressing
+            // left at the start of a row.
             withAnimation(Theme.stateChange) {
                 memory.remember(focus)
                 focus = .rail(memory.railItem)
@@ -394,11 +521,71 @@ final class AppModel {
         }
     }
 
+    // MARK: - Pointer
+
+    /// Where the cursor was when focus last moved by key press. Hover events
+    /// arriving while the cursor is still there are the content moving under a
+    /// still mouse, not the user pointing at something.
+    @ObservationIgnored private var pointerAnchor: CGPoint = .zero
+
+    private func pointerHasMoved() -> Bool {
+        let now = NSEvent.mouseLocation
+        return hypot(now.x - pointerAnchor.x, now.y - pointerAnchor.y) > 2
+    }
+
+
+    /// Moving the pointer over a card focuses it, exactly as arrowing onto it
+    /// would. Focus stays the single source of truth: the mouse is another way
+    /// to move it, never a second selection model running alongside.
+    func hover(shelf: Int, index: Int) {
+        guard pointerHasMoved() else { return }
+        let target = BrowseFocus.card(shelf: shelf, index: index)
+        guard focus != target, video(shelf: shelf, index: index) != nil else { return }
+        withAnimation(Theme.stateChange) {
+            focus = target
+            isRailExpanded = false
+        }
+        prefetchFocusedVideo()
+    }
+
+    func hover(rail item: RailItem) {
+        guard pointerHasMoved() else { return }
+        let target = BrowseFocus.rail(item)
+        guard focus != target else { return }
+        withAnimation(Theme.stateChange) {
+            memory.remember(focus)
+            focus = target
+            isRailExpanded = true
+        }
+    }
+
+    /// A click focuses first and then activates, so clicking an unfocused card
+    /// cannot play a different video than the one under the pointer.
+    func click(shelf: Int, index: Int) {
+        pointerAnchor = .zero          // a click is deliberate; never suppress it
+        hover(shelf: shelf, index: index)
+        if let video = video(shelf: shelf, index: index) { present(video) }
+    }
+
+    func click(rail item: RailItem) {
+        pointerAnchor = .zero
+        hover(rail: item)
+        if case .account = item {
+            if auth.isSignedIn { auth.signOut(); Task { await applyAuthChange() } }
+            else { isSigningIn = true }
+            return
+        }
+        open(item)
+    }
+
     /// Re-clamps focus after the feed changes shape underneath it. Shelves load
     /// asynchronously, so the focused card can be replaced while it is on screen.
     func layoutDidChange() {
         let clamped = BrowseNavigator.clamped(focus, to: layout)
         if clamped != focus { focus = clamped }
+        // A freshly loaded shelf has no thumbnails in the cache yet; start on
+        // them now rather than when the first card scrolls into view.
+        prefetchThumbnails()
     }
 
     func video(shelf: Int, index: Int) -> Video? {
@@ -502,6 +689,34 @@ final class AppModel {
     }
 
     @ObservationIgnored private var prefetchTask: Task<Void, Never>?
+
+    /// Warms thumbnails ahead of the focus.
+    ///
+    /// Not debounced, and deliberately so: this is what stops a card arriving
+    /// from the right with its title up and its picture still downloading, and
+    /// a debounce would defeat it exactly when a direction is being held. The
+    /// loader already de-duplicates in-flight requests and skips what it has
+    /// cached, so repeating the call is cheap.
+    private func prefetchThumbnails() {
+        guard case let .card(shelf, index) = focus else { return }
+        let shelves = shelves
+        guard shelves.indices.contains(shelf) else { return }
+
+        var urls: [URL] = shelves[shelf].videos
+            .dropFirst(index)
+            .prefix(16)
+            .compactMap(\.thumbnailURL)
+
+        // A few from the neighbouring rows too, since Down is as likely as Right.
+        for neighbour in [shelf - 1, shelf + 1] where shelves.indices.contains(neighbour) {
+            urls += shelves[neighbour].videos.prefix(6).compactMap(\.thumbnailURL)
+        }
+
+        thumbnailTask?.cancel()
+        thumbnailTask = Task { await ThumbnailLoader.shared.prefetch(urls) }
+    }
+
+    @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
 
     /// Pulls the next page in as focus approaches the end of a row, so the feed
     /// grows before the user reaches its edge rather than stopping dead.

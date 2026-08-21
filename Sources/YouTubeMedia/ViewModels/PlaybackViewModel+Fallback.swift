@@ -21,8 +21,25 @@ struct HLSPlaybackPolicy: Equatable, Sendable {
 
     static func resolve(label: String, isHLS: Bool) -> Self {
         guard isHLS else {
+            // A progressive (muxed/DASH) URL is signed for the client that asked
+            // for it, and the CDN checks the User-Agent against that signature.
+            // This branch used to hand back the iOS UA for every non-HLS URL
+            // whatever the client, so an `c=ANDROID_VR` muxed URL — the one
+            // client here that returns a plain playable MP4 — was fetched with
+            // the wrong UA and came back `HTTP 403: Forbidden`, while the same
+            // URL probed with the matching UA returned 206. Match the label.
+            let ua: String
+            if label.localizedCaseInsensitiveContains("androidvr") {
+                ua = InnerTubeClients.AndroidVR.userAgent
+            } else if label.localizedCaseInsensitiveContains("visionos") {
+                ua = InnerTubeClients.VisionOS.userAgent
+            } else if label.contains("WebSafari") {
+                ua = InnerTubeClients.WebSafari.userAgent
+            } else {
+                ua = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)"
+            }
             return Self(
-                userAgent: "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
+                userAgent: ua,
                 maximumHeight: nil,
                 filtersMasterManifest: false,
                 requiresH264: false
@@ -134,6 +151,42 @@ extension PlaybackViewModel {
                     return
                 }
                 playerLog.notice("[TVAuth] streams failed — continuing recovery chain")
+
+                // Take the muxed stream now, not two minutes from now.
+                //
+                // There is already a muxed last resort, but it sits past three
+                // rounds of the whole recovery chain — measured here, roughly
+                // two minutes of black screen, which is indistinguishable from
+                // a broken app. Meanwhile this very response already carries a
+                // progressive itag-18 track with a plain URL that AVPlayer
+                // plays natively, and no other path on this machine has ever
+                // resolved a stream (rqh=1 stalls `loadTracks`, WEB comes back
+                // cipher-protected).
+                //
+                // So the trade is not "360p or 1080p", it is "360p now or a
+                // black screen": exactly the reasoning that moved TVAuth itself
+                // up to Phase -2. `tvInfo` is reused, so this costs no request.
+                // The chain below still runs when muxed is absent or fails.
+                if await tryAllStreams(video: video, info: tvInfo,
+                                       label: "TVAuth/muxed-early", skipMuxed: false) {
+                    playerLog.notice("[TVAuth/muxed-early] ✅ playing muxed stream — exhaustiveRetry done")
+                    return
+                }
+                playerLog.notice("[TVAuth/muxed-early] muxed unavailable — continuing recovery chain")
+
+                // TVAuth's muxed URL turns out to be a SABR URL (c=TVHTML5),
+                // which is not a playable MP4 — measured, not assumed. The
+                // ANDROID_VR response is the one that carries a genuine
+                // progressive itag-18 track with a plain URL, and it is already
+                // treated as rqh-exempt further down the chain. So ask it
+                // directly, still ahead of the long recovery race.
+                if let vrInfo = try? await api.fetchPlayerInfoAndroidVR(videoId: video.id),
+                   await tryAllStreams(video: video, info: vrInfo,
+                                       label: "AndroidVR/muxed-early", skipMuxed: false) {
+                    playerLog.notice("[AndroidVR/muxed-early] ✅ playing muxed stream — exhaustiveRetry done")
+                    return
+                }
+                playerLog.notice("[AndroidVR/muxed-early] muxed unavailable — continuing recovery chain")
             } catch {
                 playerLog.error("[TVAuth] player request failed: \(String(describing: error)) — continuing recovery chain")
             }
@@ -1212,8 +1265,26 @@ extension PlaybackViewModel {
             let asset = qualityManager.makeHLSAsset(url: effectiveURL, options: uaOpts)
             playerLog.notice("[\(label)] HLS via AVURLAsset (native stack) url=\(effectiveURL.lastPathComponent)")
             item = AVPlayerItem(asset: asset)
+        } else if let proxied = YTProgressiveProxyLoader.makeAsset(
+            url: effectiveURL,
+            userAgent: hlsUA,
+            poToken: { [api, id = video.id] in await api.currentPoToken(for: id) },
+            renewURL: { [api, id = video.id] in
+                guard let fresh = try? await api.fetchPlayerInfoAndroidVR(videoId: id) else { return nil }
+                return fresh.formats.first { $0.mimeType.hasPrefix("video/mp4") && $0.url != nil }?.url
+            }
+        ) {
+            // Non-HLS (muxed / DASH) through the resource-loader proxy.
+            //
+            // `AVURLAssetHTTPHeaderFieldsKey` does not reach CoreMedia's network
+            // stack — the same gap `YTHLSProxyLoader` exists to close for HLS.
+            // Measured here: an itag-18 URL signed `c=ANDROID_VR` returned
+            // `HTTP 403: Forbidden` through AVURLAsset with the Oculus UA set in
+            // that option, and `206` through URLSession with the identical
+            // header. Owning the byte ranges is what makes the UA stick.
+            playerLog.notice("[\(label)] progressive via resource-loader proxy ua=\(hlsUA.prefix(28))")
+            item = AVPlayerItem(asset: proxied)
         } else {
-            // Non-HLS (muxed / DASH): direct AVURLAsset with iOS UA headers.
             let uaOpts: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": hlsHeaders]
             item = AVPlayerItem(asset: AVURLAsset(url: effectiveURL, options: uaOpts))
         }

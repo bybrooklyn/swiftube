@@ -28,6 +28,11 @@ final class PlayerModel {
     private(set) var focusedControl: PlayerControl = .playPause
     private(set) var areControlsVisible = true
 
+    /// Non-nil while the settings menu is open. Modal within the player: it
+    /// takes every directional press so the transport does not move underneath
+    /// it.
+    private(set) var menu: PlayerMenuModel?
+
     /// Set when the player should close and hand focus back to the browse surface.
     var didRequestDismiss = false
 
@@ -104,6 +109,18 @@ final class PlayerModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
+        if let menu {
+            switch intent {
+            case let .move(direction): menu.move(direction)
+            case .select:              _ = menu.select()
+            case .back, .menu:         closeMenu()
+            case .playPause:           playback.togglePlayPause()
+            case let .seek(direction): playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+            }
+            showControls()
+            return
+        }
+
         // A SponsorBlock prompt takes Select first, whatever the transport is
         // doing — the prompt is time-limited, so making the user first reveal
         // the controls and then find a button would make it useless.
@@ -143,7 +160,7 @@ final class PlayerModel {
             playback.seekRelative(seconds: direction == .forward ? 10 : -10)
 
         case .menu:
-            focusedControl = .settings
+            openMenu()
         }
     }
 
@@ -158,24 +175,38 @@ final class PlayerModel {
             loadChannelAvatar(for: playback.currentVideo?.channelId)
         case .like:      playback.like()
         case .dislike:   playback.dislike()
-        case .description, .subscribe, .comments, .save, .stats, .settings:
-            // Picker overlays are not built yet; the controls they will drive
-            // (CaptionsManager, PlaybackQualityManager) already exist on
-            // PlaybackViewModel.
+        case .settings:  openMenu()
+        case .description, .subscribe, .comments, .save, .stats:
+            // Not yet wired to a surface of their own.
             break
         }
     }
 
+    func openMenu() {
+        menu = PlayerMenuModel(playback: playback)
+        // The menu must not vanish under the auto-hide timer while it is open.
+        cancelAutoHide()
+    }
+
+    private func closeMenu() {
+        menu = nil
+        focusedControl = .settings
+        showControls()
+    }
+
     // MARK: - Auto-hide
+
+    private func cancelAutoHide() { hideTask?.cancel() }
 
     func showControls() {
         if !areControlsVisible {
             withAnimation(Theme.travel) { areControlsVisible = true }
         }
         hideTask?.cancel()
+        guard menu == nil else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: self?.autoHideDelay ?? .seconds(4))
-            guard !Task.isCancelled, let self, self.playback.isPlaying else { return }
+            guard !Task.isCancelled, let self, self.playback.isPlaying, self.menu == nil else { return }
             withAnimation(Theme.travel) { self.areControlsVisible = false }
         }
     }

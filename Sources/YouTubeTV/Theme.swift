@@ -61,7 +61,15 @@ enum Theme {
         }
         static func cardGutter(_ s: CGSize) -> CGFloat { rem(1.5, s) }
         /// Left inset for all content. Identical to the collapsed rail width.
-        static func contentInset(_ s: CGSize) -> CGFloat { rem(6.5, s) }
+        /// Content starts clear of the rail *plus* the focus ring.
+        ///
+        /// At exactly the rail width the first card's ring — which is drawn
+        /// outside the thumbnail by `focusRingInset` — landed underneath the
+        /// opaque rail, which paints over it, so the focused card looked clipped
+        /// into the sidebar.
+        static func contentInset(_ s: CGSize) -> CGFloat {
+            railCollapsed(s) + focusRingInset(s) + rem(0.5, s)
+        }
         static func thumbCorner(_ s: CGSize) -> CGFloat { rem(0.75, s) }
 
         /// The focus ring sits *outside* the thumbnail by this much, with a
@@ -95,15 +103,15 @@ enum Theme {
         static func railItemHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         static func railPillWidth(_ s: CGSize) -> CGFloat { rem(18.5, s) }
         static func railPillCorner(_ s: CGSize) -> CGFloat { rem(0.6, s) }
-        static func railPillHeight(_ s: CGSize) -> CGFloat { rem(2.79, s) }
+        static func railPillHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         /// Left edge of the selection shape, and of the dividers.
-        static func railPillLeading(_ s: CGSize) -> CGFloat { rem(1.42, s) }
+        static func railPillLeading(_ s: CGSize) -> CGFloat { rem(1.375, s) }
         /// Centre of the icon column — identical collapsed and expanded, which
         /// is why the icons do not move when the guide opens.
         static func railIconCentre(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         /// Where labels begin.
         static func railLabelLeading(_ s: CGSize) -> CGFloat { rem(5.08, s) }
-        static func railIconSize(_ s: CGSize) -> CGFloat { rem(1.5, s) }
+        static func railIconSize(_ s: CGSize) -> CGFloat { rem(1.45, s) }
         static func railLabelSize(_ s: CGSize) -> CGFloat { rem(1.4, s) }
         static func avatarSize(_ s: CGSize) -> CGFloat { rem(2.33, s) }
 

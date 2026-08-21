@@ -64,7 +64,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.entertainment</string>
     <key>NSHumanReadableCopyright</key>
-    <string>GPL-3.0. Derived from SmartTubeIOS. Not affiliated with YouTube or Google.</string>
+    <string>MIT. Derived from SmartTubeIOS. Not affiliated with YouTube or Google.</string>
 </dict>
 </plist>
 PLIST
