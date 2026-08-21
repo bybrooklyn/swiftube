@@ -23,6 +23,68 @@ struct BrowseNavigatorTests {
         return current
     }
 
+    // MARK: - Channel header
+
+    /// A channel surface: same shelves, plus the Subscribe button between the
+    /// search bar and the first row.
+    private var channelLayout: BrowseLayout {
+        BrowseLayout(shelfSizes: [5, 3, 4], hasChannelHeader: true)
+    }
+
+    @Test("up from the top shelf reaches the channel header, not the search bar")
+    func upFromTopShelfReachesChannelHeader() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.card(shelf: 0, index: 2), [.up], layout: channelLayout, memory: &memory)
+        #expect(result == .topBar(.subscribe))
+    }
+
+    @Test("without a channel header, up from the top shelf still reaches search")
+    func upFromTopShelfReachesSearchWithoutHeader() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.card(shelf: 0, index: 2), [.up], layout: layout, memory: &memory)
+        #expect(result == .topBar(.search))
+    }
+
+    @Test("the header sits between the search bar and the shelves")
+    func headerSitsBetweenSearchAndShelves() {
+        var memory = BrowseNavigator.ColumnMemory()
+        // Up from the header continues to the search bar.
+        #expect(move(.topBar(.subscribe), [.up], layout: channelLayout, memory: &memory)
+                == .topBar(.search))
+        // And down from search stops at the header rather than skipping it.
+        var fresh = BrowseNavigator.ColumnMemory()
+        #expect(move(.topBar(.search), [.down], layout: channelLayout, memory: &fresh)
+                == .topBar(.subscribe))
+    }
+
+    @Test("down from the channel header enters the first shelf")
+    func downFromHeaderEntersShelf() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.topBar(.subscribe), [.down], layout: channelLayout, memory: &memory)
+        #expect(result == .card(shelf: 0, index: 0))
+    }
+
+    @Test("left from the channel header opens the guide")
+    func leftFromHeaderOpensGuide() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.topBar(.subscribe), [.left], layout: channelLayout, memory: &memory)
+        if case .rail = result {} else {
+            Issue.record("expected the guide, got \(result)")
+        }
+    }
+
+    @Test("up and back down through the header returns to the column it left")
+    func headerRoundTripKeepsColumn() {
+        var memory = BrowseNavigator.ColumnMemory()
+        // Arrive at the column by moving, the way the app does: `ColumnMemory`
+        // is written by `next`, so a focus placed directly is not remembered.
+        let start = move(.card(shelf: 0, index: 0), [.right, .right, .right],
+                         layout: channelLayout, memory: &memory)
+        #expect(start == .card(shelf: 0, index: 3))
+        let result = move(start, [.up, .down], layout: channelLayout, memory: &memory)
+        #expect(result == .card(shelf: 0, index: 3))
+    }
+
     // MARK: - Opening the guide
 
     @Test("left from the first card opens the guide rail")

@@ -107,7 +107,8 @@ final class AppModel {
     var layout: BrowseLayout {
         BrowseLayout(railItems: railItems,
                      shelfSizes: shelves.map(\.videos.count),
-                     hasTopBar: true)
+                     hasTopBar: true,
+                     hasChannelHeader: channelHeader != nil)
     }
 
     /// Which guide entry is highlighted as the current section — distinct from
@@ -277,6 +278,7 @@ final class AppModel {
 
         selectedRailItem = item
         channelFeed = nil
+        channelHeader = nil
         customShelves = []
         browse.select(section: BrowseSection(id: type.rawValue,
                                              title: type.defaultTitle,
@@ -325,6 +327,7 @@ final class AppModel {
     /// A surface backed by a search rather than a browse id.
     private func loadSearchSurface(query: String, title: String) async {
         customShelves = []
+        channelHeader = nil
         guard let group = try? await api.search(query: query, continuationToken: nil, filter: .default) else { return }
         customShelves = [Shelf(id: "search-\(query)", title: title, videos: group.videos)]
         focus = .card(shelf: 0, index: 0)
@@ -339,6 +342,7 @@ final class AppModel {
     /// and an empty one is simply omitted rather than showing an empty row.
     private func loadLibrary() async {
         customShelves = []
+        channelHeader = nil
         var shelves: [Shelf] = []
 
         if let history = try? await api.fetchHistory(), !history.videos.isEmpty {
@@ -372,6 +376,7 @@ final class AppModel {
 
     private func loadChannel(_ channelId: String) async {
         guard let (channel, group) = try? await api.fetchChannel(channelId: channelId) else { return }
+        channelHeader = channel
         memory = BrowseNavigator.ColumnMemory()
         memory.railItem = .channel(channelId)
         channelFeed = Shelf(id: "channel-\(channelId)",
@@ -385,6 +390,35 @@ final class AppModel {
     /// Set while a channel from the guide is being shown, which replaces the
     /// browse feed until another guide entry is chosen.
     private var channelFeed: Shelf?
+
+    /// The channel whose page is showing: name, avatar, subscriber count and
+    /// whether the account follows it. Nil on every other surface, which is
+    /// also what tells `layout` whether a Subscribe button exists to focus.
+    private(set) var channelHeader: Channel?
+
+    /// Subscribes or unsubscribes from the channel whose page is showing.
+    ///
+    /// The button flips immediately and is put back if the request fails: a TV
+    /// remote gives no other feedback, and waiting on a round trip before
+    /// changing the label reads as a dropped press.
+    func toggleSubscription() {
+        guard let channel = channelHeader else { return }
+        guard auth.isSignedIn else { isSigningIn = true; return }
+
+        let wasSubscribed = channel.isSubscribed
+        channelHeader?.isSubscribed = !wasSubscribed
+
+        Task { [api, id = channel.id] in
+            do {
+                if wasSubscribed { try await api.unsubscribe(channelId: id) }
+                else             { try await api.subscribe(channelId: id) }
+                await loadGuideChannels()
+            } catch {
+                guard self.channelHeader?.id == id else { return }
+                self.channelHeader?.isSubscribed = wasSubscribed
+            }
+        }
+    }
 
     /// Fans a sign-in (or sign-out) out to every consumer that caches it.
     ///
@@ -486,8 +520,12 @@ final class AppModel {
                 else { isSigningIn = true }
             case let .rail(item):
                 open(item)
-            case .topBar:
-                break
+            case .topBar(.search):
+                // Selecting the pill opened nothing at all before; the search
+                // surface was reachable only from the guide.
+                openSearch()
+            case .topBar(.subscribe):
+                toggleSubscription()
             }
 
         case .back:

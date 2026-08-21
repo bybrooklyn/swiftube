@@ -16,6 +16,14 @@ struct RootView: View {
                     TopBar(focus: model.focus,
                            accountAvatarURL: model.auth.accountAvatarURL,
                            isPremium: false)
+                    if let channel = model.channelHeader {
+                        ChannelHeader(channel: channel,
+                                      isFocused: model.focus == .topBar(.subscribe),
+                                      onSelect: { model.toggleSubscription() })
+                            .padding(.horizontal, Theme.Metrics.contentInset(geo.size))
+                            .padding(.bottom, Theme.Metrics.rem(1.25, geo.size))
+                            .transition(.opacity)
+                    }
                     ShelfListView(model: model)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }

@@ -61,6 +61,25 @@ extension InnerTubeAPI {
     /// all three actions share this endpoint and differ only in their `feedbackToken`.
     /// Tokens are parsed from `videoRenderer.menu.menuRenderer.items` in the feed response.
     /// Requires authentication.
+    /// Subscribes the authenticated user to a channel.
+    ///
+    /// The only write path the ported pipeline was missing: like, dislike and
+    /// Watch Later were all here, so this follows their shape exactly —
+    /// `postTV` with the TV client context. `channelIds` is an array because
+    /// the endpoint accepts several at once, not because we send more than one.
+    public func subscribe(channelId: String) async throws {
+        var body = makeBody(client: tvClientContext)
+        body["channelIds"] = [channelId]
+        _ = try await postTV(endpoint: "subscription/subscribe", body: body)
+    }
+
+    /// Unsubscribes the authenticated user from a channel.
+    public func unsubscribe(channelId: String) async throws {
+        var body = makeBody(client: tvClientContext)
+        body["channelIds"] = [channelId]
+        _ = try await postTV(endpoint: "subscription/unsubscribe", body: body)
+    }
+
     public func sendFeedback(token: String) async throws {
         var body = makeBody(client: tvClientContext)
         body["feedbackTokens"] = [token]

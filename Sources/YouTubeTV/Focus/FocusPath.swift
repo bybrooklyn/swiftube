@@ -65,12 +65,15 @@ public enum BrowseFocus: Equatable, Hashable, Sendable {
     case card(shelf: Int, index: Int)
 }
 
-/// The focusable elements of the top bar.
+/// The focusable elements above the shelves.
 ///
-/// Only the search pill: the account avatar belongs to the guide, and the bar
-/// merely reserves its column as blank space.
+/// The search pill is the top bar proper — the account avatar belongs to the
+/// guide, and the bar merely reserves its column as blank space. `subscribe`
+/// is the channel header's button, which sits below the bar and above the
+/// shelves, and exists only while a channel surface is showing.
 public enum TopBarItem: Equatable, Hashable, Sendable, CaseIterable {
     case search
+    case subscribe
 }
 
 /// Sizes of the currently displayed browse surface. The navigator is a pure
@@ -84,13 +87,18 @@ public struct BrowseLayout: Equatable, Sendable {
     public var shelfSizes: [Int]
     /// Whether a top bar is present to move up into.
     public var hasTopBar: Bool
+    /// Whether a channel header with a Subscribe button sits between the top
+    /// bar and the shelves.
+    public var hasChannelHeader: Bool
 
     public init(railItems: [RailItem] = RailItem.fixed,
                 shelfSizes: [Int] = [],
-                hasTopBar: Bool = true) {
+                hasTopBar: Bool = true,
+                hasChannelHeader: Bool = false) {
         self.railItems = railItems
         self.shelfSizes = shelfSizes
         self.hasTopBar = hasTopBar
+        self.hasChannelHeader = hasChannelHeader
     }
 
     /// Shelves that currently have something to focus. A shelf still loading has

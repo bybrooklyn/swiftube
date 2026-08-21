@@ -90,6 +90,19 @@ public enum BrowseNavigator {
 
         // MARK: Top bar
         case let .topBar(item):
+            if item == .subscribe {
+                switch direction {
+                case .left:
+                    return .rail(memory.railItem)
+                case .right:
+                    return focus
+                case .up:
+                    return layout.hasTopBar ? .topBar(.search) : focus
+                case .down:
+                    guard let shelf = layout.firstFocusableShelf else { return focus }
+                    return .card(shelf: shelf, index: memory.index(forShelf: shelf, layout: layout))
+                }
+            }
             switch direction {
             case .left:
                 // Straight to the guide. There is no avatar in the top bar to
@@ -101,6 +114,7 @@ public enum BrowseNavigator {
             case .right:
                 return focus
             case .down:
+                if layout.hasChannelHeader { return .topBar(.subscribe) }
                 guard let shelf = layout.firstFocusableShelf else { return focus }
                 return .card(shelf: shelf, index: memory.index(forShelf: shelf, layout: layout))
             case .up:
@@ -119,7 +133,9 @@ public enum BrowseNavigator {
                 if let above = previousFocusableShelf(before: shelf, layout: layout) {
                     return .card(shelf: above, index: memory.index(forShelf: above, layout: layout))
                 }
-                // Above the topmost shelf sits the search bar.
+                // Above the topmost shelf sits the channel header when there
+                // is one, and the search bar otherwise.
+                if layout.hasChannelHeader { return .topBar(.subscribe) }
                 return layout.hasTopBar ? .topBar(.search) : focus
             case .down:
                 if let below = nextFocusableShelf(after: shelf, layout: layout) {
