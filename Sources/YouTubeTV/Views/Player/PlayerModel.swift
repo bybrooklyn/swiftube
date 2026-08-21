@@ -104,6 +104,15 @@ final class PlayerModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
+        // A SponsorBlock prompt takes Select first, whatever the transport is
+        // doing — the prompt is time-limited, so making the user first reveal
+        // the controls and then find a button would make it useless.
+        if intent == .select, playback.currentToastSegment != nil {
+            playback.skipToastSegment()
+            showControls()
+            return
+        }
+
         // Any input at all brings the controls back and restarts the timer —
         // including a press that then does nothing, which is what makes the bar
         // feel responsive rather than modal.

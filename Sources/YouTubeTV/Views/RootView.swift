@@ -41,6 +41,11 @@ struct RootView: View {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
+                if let search = model.search {
+                    SearchView(model: search)
+                        .zIndex(3)
+                }
+
                 if let settings = model.settings {
                     SettingsView(model: settings)
                         .zIndex(3)

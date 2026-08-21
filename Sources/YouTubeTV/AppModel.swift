@@ -50,6 +50,10 @@ final class AppModel {
     /// Non-nil while the settings surface is up. Modal, like the player.
     private(set) var settings: SettingsModel?
 
+    /// Non-nil while search is up. Also modal — the on-screen keyboard needs
+    /// every directional press.
+    private(set) var search: SearchModel?
+
     private(set) var focus: BrowseFocus = .card(shelf: 0, index: 0)
     private(set) var isRailExpanded = false
 
@@ -139,6 +143,7 @@ final class AppModel {
         case "signin":   isSigningIn = true
         case "guide":    focus = .rail(.home); isRailExpanded = true
         case "settings": open(.settings)
+        case "search":   openSearch()
         default:         break
         }
         input.start { [weak self] intent in
@@ -204,6 +209,11 @@ final class AppModel {
             return
         }
 
+        if item == .search {
+            openSearch()
+            return
+        }
+
         // Bail *before* mutating anything. Search and Podcasts have no section
         // to load yet; moving the selection highlight and clearing the channel
         // feed for them silently reverted the visible feed to Home while
@@ -224,6 +234,19 @@ final class AppModel {
         memory = BrowseNavigator.ColumnMemory()
         memory.railItem = item
         isRailExpanded = false
+    }
+
+    func openSearch() {
+        isRailExpanded = false
+        selectedRailItem = .search
+        memory.railItem = .search
+        search = SearchModel(api: api)
+    }
+
+    private func closeSearch() {
+        search = nil
+        focus = .rail(.search)
+        isRailExpanded = true
     }
 
     func openSettings() {
@@ -299,6 +322,18 @@ final class AppModel {
             if intent == .back {
                 auth.cancelSignIn()
                 finishSignIn()
+            }
+            return
+        }
+
+        if let search {
+            switch intent {
+            case let .move(direction): search.move(direction)
+            case .select:
+                // Selecting a result plays it; selecting a key types it.
+                if let video = search.focusedResult { present(video) } else { search.select() }
+            case .back:                closeSearch()
+            default:                   break
             }
             return
         }

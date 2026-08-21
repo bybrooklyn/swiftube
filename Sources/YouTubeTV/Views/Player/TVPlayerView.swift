@@ -30,8 +30,51 @@ struct TVPlayerView: View {
             if model.areControlsVisible {
                 overlay.transition(.opacity)
             }
+
+            // Shown independently of the controls: a skip prompt is useless if
+            // it only appears while the transport happens to be up.
+            if let segment = model.playback.currentToastSegment {
+                sponsorToast(segment)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(Theme.travel, value: model.areControlsVisible)
+        .animation(Theme.stateChange, value: model.playback.currentToastSegment)
+    }
+
+    /// The SponsorBlock prompt, for categories set to "show toast" rather than
+    /// auto-skip. Press Select to take it.
+    private func sponsorToast(_ segment: SponsorSegment) -> some View {
+        HStack(spacing: rem(0.6)) {
+            Image(systemName: "forward.end.alt.fill")
+                .font(.system(size: rem(0.9), weight: .semibold))
+            Text("Skip \(Self.label(for: segment.category))")
+                .font(.system(size: rem(1.0), weight: .semibold))
+        }
+        .foregroundStyle(Theme.textPrimary)
+        .padding(.horizontal, rem(1.1))
+        .padding(.vertical, rem(0.7))
+        .background(.black.opacity(0.82), in: .capsule)
+        .overlay(Capsule().strokeBorder(Theme.focusRing, lineWidth: rem(0.1)))
+        .padding(.trailing, inset)
+        // Sits clear of the transport row so it never collides with the
+        // controls when both are on screen.
+        .padding(.bottom, viewport.height * 0.26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    }
+
+    static func label(for category: SponsorSegment.Category) -> String {
+        switch category {
+        case .sponsor:       "sponsor"
+        case .selfPromo:     "self-promo"
+        case .interaction:   "reminder"
+        case .intro:         "intro"
+        case .outro:         "endcards"
+        case .preview:       "recap"
+        case .filler:        "filler"
+        case .musicOfftopic: "non-music"
+        case .poiHighlight:  "to highlight"
+        }
     }
 
     private var overlay: some View {
