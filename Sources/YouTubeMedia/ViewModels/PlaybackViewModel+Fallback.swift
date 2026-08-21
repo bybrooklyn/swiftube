@@ -113,6 +113,32 @@ extension PlaybackViewModel {
             playerLog.notice("[VisionOS] player request failed: \(error) — continuing legacy fallbacks")
         }
         #endif
+        // Phase -2: authenticated TV client, first.
+        //
+        // For a signed-in user this is the path most likely to work — the TV
+        // client returns an hlsManifestUrl whose CDN URLs bypass rqh=1
+        // enforcement (see the phase notes below). It used to sit at priority 0
+        // *inside the attempt loop*, which only runs after the WKWebView race
+        // and the serial extraction have both given up. Measured on this
+        // machine that is two 40 s timeouts: the client with the best chance of
+        // playing was tried 80 s in, long after the user has concluded the app
+        // is broken.
+        //
+        // Trying it up front costs one request when it fails, and skips the
+        // whole recovery chain when it works.
+        if hasAuthToken {
+            do {
+                let tvInfo = try await api.fetchPlayerInfoAuthenticated(videoId: video.id)
+                if await tryAllStreams(video: video, info: tvInfo, label: "TVAuth", skipMuxed: true) {
+                    playerLog.notice("[TVAuth] ✅ authenticated TV playback — exhaustiveRetry done")
+                    return
+                }
+                playerLog.notice("[TVAuth] streams failed — continuing recovery chain")
+            } catch {
+                playerLog.error("[TVAuth] player request failed: \(String(describing: error)) — continuing recovery chain")
+            }
+        }
+
         #if canImport(WebKit)
         // Phase -1a: Cached WKWebView HLS URL shortcut — skip 5–9 s extraction when the
         // master manifest URL for this video was stored by a prior session or neighbour
@@ -359,9 +385,22 @@ extension PlaybackViewModel {
                 // 0 — TVAuth (authenticated TV client, HLS)
                 if capturedHasAuth {
                     fetchGroup.addTask {
-                        guard let info = try? await self.api.fetchPlayerInfoAuthenticated(videoId: video.id) else { return nil }
-                        return .result(_FR(priority: 0, label: "TVAuth[\(attempt)]", info: info, skipMuxed: true))
+                        do {
+                            let info = try await self.api.fetchPlayerInfoAuthenticated(videoId: video.id)
+                            return .result(_FR(priority: 0, label: "TVAuth[\(attempt)]", info: info, skipMuxed: true))
+                        } catch {
+                            // Deliberately not `try?`. This is the phase that is
+                            // supposed to carry playback for a signed-in user —
+                            // authenticated TV HLS bypasses rqh=1 CDN
+                            // enforcement — so when it fails the reason has to be
+                            // visible. Swallowing it made TVAuth look like it had
+                            // never run at all.
+                            playerLog.error("[TVAuth] fetch failed: \(String(describing: error))")
+                            return nil
+                        }
                     }
+                } else {
+                    playerLog.notice("[TVAuth] skipped — no auth token on the player")
                 }
 
                 // 1 — MWEB (no embedding restriction, no pot= required for HLS)
@@ -521,6 +560,25 @@ extension PlaybackViewModel {
         }
 
         guard !Task.isCancelled else { return }
+
+        // Last resort: the authenticated TV client's muxed stream.
+        //
+        // Phase -2 asks TVAuth for HLS or adaptive and refuses its muxed
+        // formats, because muxed is a single low-resolution track with no
+        // quality ladder. But when every other client has failed the real
+        // choice is not "muxed or 1080p", it is "muxed or a black screen" —
+        // and this response is the one thing in the whole chain we know
+        // YouTube served us. Measured here: TVAuth returns
+        // `HLS=false DASH=false adaptive=false muxed=true`, and it was being
+        // thrown away.
+        if hasAuthToken, let tvInfo = try? await api.fetchPlayerInfoAuthenticated(videoId: video.id) {
+            playerLog.notice("[TVAuth/muxed] every client failed — retrying TVAuth allowing muxed")
+            if await tryAllStreams(video: video, info: tvInfo, label: "TVAuth/muxed", skipMuxed: false) {
+                playerLog.notice("[TVAuth/muxed] ✅ playing muxed stream — exhaustiveRetry done")
+                return
+            }
+        }
+
         playerLog.error("❌ All 3 retry attempts exhausted for \(video.id)")
         error = APIError.unavailable("Unable to play this video")
         isLoading = false
@@ -1429,6 +1487,19 @@ extension PlaybackViewModel {
                 let isVRAttempt = clientParam == "ANDROID_VR"
                 #if os(tvOS)
                 let timeoutNs: UInt64 = isVRAttempt ? 2_000_000_000 : 3_000_000_000
+                #elseif os(macOS)
+                // macOS gets a far longer budget than the iOS caps below.
+                //
+                // Those caps exist for a specific false positive: on iOS the
+                // rqh=1 CDN answers the one-byte probe with a 206 and then
+                // stalls the real segment requests, so a short timeout avoids
+                // wasting 8s per attempt. On this machine the probe reports
+                // "HTTP 206 128KB delivered — moov atom accessible" and
+                // loadTracks *is* progressing — it simply needs longer than 2s
+                // to pull the moov atom over a cold connection. Cutting it off
+                // at the iOS value threw away a working stream, which is the
+                // difference between playback and none at all.
+                let timeoutNs: UInt64 = isVRAttempt ? 12_000_000_000 : 15_000_000_000
                 #else
                 // fix30 (task #230): 1.5s for non-VR iOS first-video loads.
                 // fix_task240: 2s for AndroidVR (was 8s) — false-positive probe scenario.
@@ -1447,6 +1518,8 @@ extension PlaybackViewModel {
                 } else {
                     #if os(tvOS)
                     let timeoutSec = isVRAttempt ? 2 : 3
+                    #elseif os(macOS)
+                    let timeoutSec = isVRAttempt ? 12 : 15
                     #else
                     let timeoutSec = isVRAttempt ? 2 : (needsQuickStartup ? 1 : 8)  // VR=2s (fix_task240), non-VR quick=1.5s (fix30)
                     #endif

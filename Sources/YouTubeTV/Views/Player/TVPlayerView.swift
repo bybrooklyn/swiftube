@@ -19,9 +19,14 @@ struct TVPlayerView: View {
     private func rem(_ n: CGFloat) -> CGFloat { Theme.Metrics.rem(n, viewport) }
 
     var body: some View {
+        // No `ignoresSafeArea` on the video surface: the window is already
+        // borderless with a full-size content view, so it gains nothing — and it
+        // widened the ZStack past the window, which the overlay then inherited.
+        // That is what pushed the transport's right-hand cluster off frame and
+        // ran the scrubber past the right edge.
         ZStack {
-            Color.black.ignoresSafeArea()
-            PlayerSurface(player: model.playback.player).ignoresSafeArea()
+            Color.black
+            PlayerSurface(player: model.playback.player)
 
             if model.playback.isLoading {
                 ProgressView().controlSize(.large).tint(.white)
@@ -83,6 +88,7 @@ struct TVPlayerView: View {
             Spacer(minLength: 0)
             footer
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             // Scrims top and bottom rather than a full-width glass panel: glass
             // across the whole width would blur live video the entire time the
@@ -137,6 +143,16 @@ struct TVPlayerView: View {
                 .padding(.bottom, rem(0.5))
             transportRow
         }
+        // KNOWN ISSUE: the scrubber still overruns the right edge and the
+        // transport's right-hand cluster lands off-screen. The cause is that a
+        // ZStack sizes to its largest child and the shelves behind the player
+        // are far wider than the window, so the proposal reaching here is too
+        // wide. Deriving an explicit width from `viewport` instead was worse —
+        // it measures zero on the first layout pass and the whole overlay
+        // vanishes. The real fix is to stop the shelves inflating the root's
+        // layout size (clipping does not change it), which is a change to
+        // ShelfListView, not here.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, inset)
         .padding(.bottom, inset)
     }
@@ -169,7 +185,12 @@ struct TVPlayerView: View {
                 Spacer(minLength: 0)
                 rightActions
             }
+            // Without this the HStack sizes to its content, so the ZStack
+            // collapsed around the left cluster and the right one was pushed
+            // off the frame entirely.
+            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity)
         .frame(height: Theme.Metrics.transportButtonLarge(viewport))
     }
 

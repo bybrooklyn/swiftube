@@ -62,6 +62,16 @@ struct RootView: View {
                         .zIndex(1)
                 }
             }
+            // Pinned to the window, and clipped.
+            //
+            // A ZStack takes the size of its largest child, and the shelf rows
+            // are deliberately far wider than the window — they are long
+            // horizontal strips translated left. Without this the whole root
+            // adopted that width, and every full-width child inherited it: the
+            // player's scrubber ran past the right edge and its right-hand
+            // button cluster was laid out entirely off-screen.
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .clipped()
             .environment(\.viewportSize, geo.size)
             // The hidden titlebar still reserves a safe area, which pushed the
             // whole page down by ~34pt. A 10-foot UI owns the entire window.
