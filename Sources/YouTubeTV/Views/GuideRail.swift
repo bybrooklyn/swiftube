@@ -70,9 +70,15 @@ struct GuideRail: View {
     }
 
     private var divider: some View {
+        // Width follows the guide's state. Fixed at the expanded pill width it
+        // was ~3x wider than the collapsed rail, so the hairlines drew straight
+        // across the shelves as two stray lines over the content.
         Rectangle()
             .fill(Theme.divider)
-            .frame(width: Theme.Metrics.railPillWidth(viewport), height: 1)
+            .frame(width: isExpanded
+                   ? Theme.Metrics.railPillWidth(viewport)
+                   : Theme.Metrics.railCollapsed(viewport) - Theme.Metrics.railPillLeading(viewport) * 2,
+                   height: 1)
             .frame(height: Self.dividerHeight(viewport))
             .padding(.leading, Theme.Metrics.railPillLeading(viewport))
     }

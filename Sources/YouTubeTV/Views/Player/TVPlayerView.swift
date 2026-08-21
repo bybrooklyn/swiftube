@@ -45,14 +45,14 @@ struct TVPlayerView: View {
             // across the whole width would blur live video the entire time the
             // controls are up, which is the one place in this UI where it
             // measurably costs frames. Glass is kept for the small pills below.
+            // Bottom scrim only. The reference has no top gradient at all — the
+            // title is legible because it sits on its own black run, which keeps
+            // the top third of the frame unobscured.
             VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.72), .clear],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: viewport.height * 0.32)
                 Spacer(minLength: 0)
-                LinearGradient(colors: [.clear, .black.opacity(0.88)],
+                LinearGradient(colors: [.clear, .black.opacity(0.85)],
                                startPoint: .top, endPoint: .bottom)
-                    .frame(height: viewport.height * 0.42)
+                    .frame(height: viewport.height * 0.40)
             }
             .ignoresSafeArea()
         }
@@ -61,14 +61,21 @@ struct TVPlayerView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: rem(0.5)) {
+        // Each line sits on its own opaque black run rather than over a
+        // gradient. That is what the real client does, and it is what keeps a
+        // title legible over a bright frame without dimming the whole video.
+        VStack(alignment: .leading, spacing: rem(0.35)) {
             Text(model.title)
                 .font(.system(size: Theme.Metrics.playerTitleSize(viewport), weight: .black))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(3)
+                .padding(.horizontal, rem(0.2))
+                .background(Color.black)
             Text(model.metaLine)
                 .font(.system(size: Theme.Metrics.playerMetaSize(viewport)))
                 .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, rem(0.2))
+                .background(Color.black)
         }
         // The real client caps the title block at 36rem so it never runs into
         // the right edge of a 16:9 frame.
@@ -96,11 +103,15 @@ struct TVPlayerView: View {
     private var timeline: some View {
         HStack {
             Text(model.positionLabel)
+                .padding(.horizontal, rem(0.2))
+                .background(Color.black)
             Spacer()
             Text(formatDuration(model.playback.duration))
+                .padding(.horizontal, rem(0.2))
+                .background(Color.black)
         }
         .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .medium))
-        .foregroundStyle(Theme.textTertiary)
+        .foregroundStyle(Theme.textPrimary)
     }
 
     private var transportRow: some View {
