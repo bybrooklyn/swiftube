@@ -50,6 +50,20 @@ final class PlayerModel {
     /// ever showed it, so playback looked like a dead end even though it was not.
     var upNext: [Video] { playback.relatedVideos }
 
+    // MARK: - Comments
+
+    private(set) var comments: [Comment] = []
+    private(set) var isLoadingComments = false
+    /// Which comment has focus while the panel is open; nil when it is closed.
+    private(set) var commentIndex: Int?
+    var isCommentsOpen: Bool { commentIndex != nil }
+
+    /// Whether the account follows the channel of whatever is playing, and
+    /// whether this video is in Watch Later. Both are optimistic: the button
+    /// changes on press and is put back if the write fails.
+    private(set) var isSubscribed = false
+    private(set) var isSaved = false
+
     @ObservationIgnored private var hideTask: Task<Void, Never>?
 
     /// How long the controls stay up after the last input.
@@ -81,7 +95,8 @@ final class PlayerModel {
     }
 
     func symbol(for control: PlayerControl) -> String {
-        control.symbol(isPlaying: playback.isPlaying, likeStatus: playback.likeStatus)
+        control.symbol(isPlaying: playback.isPlaying, likeStatus: playback.likeStatus,
+                       isSubscribed: isSubscribed, isSaved: isSaved)
     }
 
     var progress: Double {
@@ -91,6 +106,10 @@ final class PlayerModel {
 
     func play(_ video: Video) {
         upNextIndex = nil
+        commentIndex = nil
+        comments = []
+        isSubscribed = false
+        isSaved = false
         playback.load(video: video)
         showControls()
         loadChannelAvatar(for: video.channelId)
@@ -131,6 +150,25 @@ final class PlayerModel {
             case .back, .menu:         closeMenu()
             case .playPause:           playback.togglePlayPause()
             case let .seek(direction): playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+            }
+            showControls()
+            return
+        }
+
+        if let index = commentIndex {
+            switch intent {
+            case .move(.up):
+                if index > 0 { withAnimation(Theme.stateChange) { commentIndex = index - 1 } }
+            case .move(.down):
+                if index + 1 < comments.count { withAnimation(Theme.stateChange) { commentIndex = index + 1 } }
+            case .move(.left), .move(.right), .select:
+                break
+            case .back, .menu:
+                closeComments()
+            case .playPause:
+                playback.togglePlayPause()
+            case let .seek(direction):
+                playback.seekRelative(seconds: direction == .forward ? 10 : -10)
             }
             showControls()
             return
@@ -223,10 +261,70 @@ final class PlayerModel {
         case .like:      playback.like()
         case .dislike:   playback.dislike()
         case .settings:  openMenu()
-        case .description, .subscribe, .comments, .save, .stats:
-            // Not yet wired to a surface of their own.
+        case .comments:  openComments()
+        case .subscribe: toggleSubscribe()
+        case .save:      toggleSaved()
+        case .description, .stats:
+            // Still without a surface of their own.
             break
         }
+    }
+
+    private func openComments() {
+        guard let videoId = playback.currentVideo?.id else { return }
+        withAnimation(Theme.stateChange) { commentIndex = 0 }
+        cancelAutoHide()
+        guard comments.isEmpty else { return }
+        isLoadingComments = true
+        Task { [api] in
+            let loaded = (try? await api.fetchComments(videoId: videoId)) ?? []
+            guard self.playback.currentVideo?.id == videoId else { return }
+            self.comments = loaded
+            self.isLoadingComments = false
+        }
+    }
+
+    private func closeComments() {
+        withAnimation(Theme.stateChange) { commentIndex = nil }
+        focusedControl = .comments
+        showControls()
+    }
+
+    /// Follows or unfollows the channel of whatever is playing.
+    private func toggleSubscribe() {
+        guard let channelId = playback.currentVideo?.channelId else { return }
+        let was = isSubscribed
+        isSubscribed = !was
+        Task { [api] in
+            do {
+                if was { try await api.unsubscribe(channelId: channelId) }
+                else    { try await api.subscribe(channelId: channelId) }
+            } catch {
+                guard self.playback.currentVideo?.channelId == channelId else { return }
+                self.isSubscribed = was
+            }
+        }
+    }
+
+    /// Adds or removes the current video from Watch Later.
+    private func toggleSaved() {
+        guard let videoId = playback.currentVideo?.id else { return }
+        let was = isSaved
+        isSaved = !was
+        Task { [api] in
+            do {
+                if was { try await api.removeFromWatchLater(videoId: videoId) }
+                else    { try await api.addToWatchLater(videoId: videoId) }
+            } catch {
+                guard self.playback.currentVideo?.id == videoId else { return }
+                self.isSaved = was
+            }
+        }
+    }
+
+    func hoverComment(_ index: Int) {
+        guard comments.indices.contains(index), commentIndex != index else { return }
+        withAnimation(Theme.stateChange) { commentIndex = index }
     }
 
     private func closeUpNext() {

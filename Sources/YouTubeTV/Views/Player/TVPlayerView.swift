@@ -95,6 +95,14 @@ struct TVPlayerView: View {
             Spacer(minLength: 0)
             footer
         }
+        .overlay(alignment: .trailing) {
+            if model.isCommentsOpen {
+                CommentsPanel(model: model)
+                    .padding(.trailing, inset)
+                    .padding(.vertical, inset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             // Scrims top and bottom rather than a full-width glass panel: glass
