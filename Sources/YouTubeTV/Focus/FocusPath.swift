@@ -31,6 +31,8 @@ public enum RailItem: Hashable, Sendable {
         case .home:          "home"
         case .shorts:        "shorts"
         case .subscriptions: "subscriptions"
+        // Backed by the playlists fetch for now; a real Library combines
+        // history + playlists + downloads.
         case .library:       "playlists"
         case .music:         "music"
         case .gaming:        "gaming"

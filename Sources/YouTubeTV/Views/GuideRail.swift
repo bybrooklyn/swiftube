@@ -1,13 +1,21 @@
 import SwiftUI
 import YouTubeCore
 
-/// The guide down the left edge: an icon rail that widens into a labelled menu
-/// when focus enters it.
+/// The guide down the left edge.
 ///
-/// Structure follows the real client: account · Search · Home · divider ·
-/// subscribed channels · Subscriptions · Library · divider · categories ·
-/// divider · Settings. The channel entries are what make it feel like the real
-/// guide rather than a generic sidebar.
+/// Every metric here was measured off the real client (1920×1080, 1rem = 24px)
+/// rather than estimated, because earlier guesses were consistently wrong:
+///
+///   * The collapsed rail draws **no highlight at all** — just outline icons on
+///     the page background. The selection shape exists only while the guide has
+///     focus. Drawing a permanent pill is what made every earlier version look
+///     unlike the real thing.
+///   * The expanded guide has **no panel colour**; it is the same `#0F0F0F` as
+///     the page, and the content simply starts further right.
+///   * The focused entry is a **filled `#F1F1F1` rectangle** 18.5rem wide with
+///     its icon and label inverted to dark — not a translucent grey pill.
+///   * Icons sit at the same x in both states (3.25rem), so opening the guide
+///     moves only the labels.
 struct GuideRail: View {
 
     let items: [RailItem]
@@ -20,16 +28,17 @@ struct GuideRail: View {
 
     @Environment(\.viewportSize) private var viewport
 
-    /// Namespace for the Liquid Glass focus highlight. Sharing one
-    /// `glassEffectID` across entries makes the highlight *travel* between them
-    /// instead of fading out in one place and in at another — which is the whole
-    /// reason to use glass here rather than a plain capsule.
+    /// Namespace for the Liquid Glass highlight, so it travels between entries
+    /// rather than fading out in one place and in at another.
     @Namespace private var glass
 
     private var focusedItem: RailItem? {
         if case let .rail(item) = focus { return item }
         return nil
     }
+
+    /// The highlight is only drawn while the guide holds focus.
+    private var guideHasFocus: Bool { focusedItem != nil }
 
     private var width: CGFloat {
         isExpanded ? Theme.Metrics.railExpanded(viewport) : Theme.Metrics.railCollapsed(viewport)
@@ -40,60 +49,89 @@ struct GuideRail: View {
             GlassEffectContainer(spacing: Theme.Metrics.rem(0.2, viewport)) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        if needsDividerBefore(item) {
-                            Divider()
-                                .overlay(Theme.divider)
-                                // Fixed height, matching the constant used by
-                                // scrollOffset — if the two drift, the guide
-                                // scrolls to the wrong place.
-                                .frame(height: Self.dividerHeight(viewport))
-                                .frame(width: isExpanded
-                                       ? Theme.Metrics.railPillWidth(viewport)
-                                       : iconBox)
-                                .padding(.leading, iconLeading)
-                        }
+                        if needsDividerBefore(item) { divider }
                         row(for: item)
                             .frame(height: Theme.Metrics.railItemHeight(viewport))
                     }
                 }
-                // The guide is taller than the window once a few subscribed
-                // channels are in it, so it scrolls to keep the focused entry
-                // visible instead of running off the bottom.
                 .offset(y: scrollOffset(in: geo.size))
                 .animation(Theme.travel, value: focusedItem)
                 .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.vertical, Theme.Metrics.rem(1.4, viewport))
+                .padding(.vertical, Theme.Metrics.rem(2.4, viewport))
                 .clipped()
             }
         }
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background {
-            // Opaque in both states. Cards translate left as a row scrolls and
-            // would otherwise draw straight through a transparent rail —
-            // visible as card titles sliding behind the icons. Expanded uses the
-            // lighter panel colour; collapsed matches the page so the rail reads
-            // as part of the background rather than a floating strip.
-            (isExpanded ? Theme.guidePanel : Theme.canvas)
-                .ignoresSafeArea()
-        }
+        // Opaque, and the same colour as the page. Cards translate left as a row
+        // scrolls and would otherwise draw straight through the rail.
+        .background(Theme.canvas.ignoresSafeArea())
         .animation(Theme.travel, value: isExpanded)
     }
 
-    private static func dividerHeight(_ s: CGSize) -> CGFloat {
-        Theme.Metrics.rem(0.7, s)
+    private var divider: some View {
+        Rectangle()
+            .fill(Theme.divider)
+            .frame(width: Theme.Metrics.railPillWidth(viewport), height: 1)
+            .frame(height: Self.dividerHeight(viewport))
+            .padding(.leading, Theme.Metrics.railPillLeading(viewport))
+    }
+
+    static func dividerHeight(_ s: CGSize) -> CGFloat { Theme.Metrics.rem(1.0, s) }
+
+    @ViewBuilder
+    private func row(for item: RailItem) -> some View {
+        let isFocused = focusedItem == item
+        // Selection is shown by the same filled shape, but only while the guide
+        // is open and focused; with focus in the content the rail is bare.
+        let isHighlighted = guideHasFocus && (isFocused || (focusedItem == nil && selected == item))
+        let pillHeight = Theme.Metrics.railPillHeight(viewport)
+        let iconCentre = Theme.Metrics.railIconCentre(viewport)
+        let labelLeading = Theme.Metrics.railLabelLeading(viewport)
+
+        ZStack(alignment: .leading) {
+            if isHighlighted {
+                RoundedRectangle(cornerRadius: Theme.Metrics.railPillCorner(viewport), style: .continuous)
+                    .fill(Theme.focusRing)
+                    .frame(width: isExpanded
+                           ? Theme.Metrics.railPillWidth(viewport)
+                           : pillHeight,
+                           height: pillHeight)
+                    .padding(.leading, isExpanded
+                             ? Theme.Metrics.railPillLeading(viewport)
+                             : iconCentre - pillHeight / 2)
+                    .glassEffectID("rail.selection", in: glass)
+            }
+
+            icon(for: item, size: Theme.Metrics.railIconSize(viewport))
+                .frame(width: Theme.Metrics.railIconSize(viewport) * 1.6,
+                       height: Theme.Metrics.railIconSize(viewport) * 1.6)
+                .position(x: iconCentre, y: Theme.Metrics.railItemHeight(viewport) / 2)
+
+            // Always laid out, revealed by the guide's width — inserting it
+            // would re-lay-out the stack and make the icons jump.
+            Text(label(for: item))
+                .font(.system(size: Theme.Metrics.railLabelSize(viewport),
+                              weight: .regular))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.leading, labelLeading)
+                .opacity(isExpanded ? 1 : 0)
+        }
+        .foregroundStyle(isHighlighted ? Theme.canvas : Theme.textPrimary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
     }
 
     /// Keeps the focused entry inside the visible column.
     ///
-    /// Stateless by design: the offset is derived from the focused index each
-    /// time rather than accumulated, so it cannot drift out of step with focus.
-    /// The result is zero (no scroll) until the focused row would fall past the
-    /// bottom, then exactly enough to bring it back with one row of lookahead.
+    /// Stateless: derived from the focused index each time rather than
+    /// accumulated, so it cannot drift out of step with focus. Zero until the
+    /// focused row would fall past the bottom, then just enough to bring it back.
     private func scrollOffset(in size: CGSize) -> CGFloat {
         let itemHeight = Theme.Metrics.railItemHeight(viewport)
         let dividerHeight = Self.dividerHeight(viewport)
-        let visible = max(size.height - Theme.Metrics.rem(1.4, viewport) * 2, itemHeight)
+        let visible = max(size.height - Theme.Metrics.rem(2.4, viewport) * 2, itemHeight)
 
         var focusedTop: CGFloat = 0
         var total: CGFloat = 0
@@ -104,21 +142,13 @@ struct GuideRail: View {
         }
 
         guard total > visible else { return 0 }
-
-        // One row of lookahead so the next entry is visible before you land on it.
-        let overshoot = focusedTop + itemHeight * 2 - visible
-        return -min(max(overshoot, 0), total - visible)
+        return -min(max(focusedTop + itemHeight * 2 - visible, 0), total - visible)
     }
 
-    /// The real guide groups entries with hairlines: after Home, after Library,
-    /// and before Settings.
+    /// Two hairlines: after Shorts, and after Library.
     private func needsDividerBefore(_ item: RailItem) -> Bool {
-        // Measured order: [account, Search, Home, Shorts] · channels,
-        // Subscriptions, Library · categories … Settings. Two dividers, and
-        // Settings is simply the last row rather than sitting behind a third.
         switch item {
         case .channel:
-            // Only before the first channel.
             return items.first { if case .channel = $0 { return true }; return false } == item
         case .subscriptions:
             return !items.contains { if case .channel = $0 { return true }; return false }
@@ -129,75 +159,19 @@ struct GuideRail: View {
         }
     }
 
-    /// Diameter of the icon's box — and, collapsed, of the selection circle
-    /// that wraps it exactly.
-    private var iconBox: CGFloat { Theme.Metrics.rem(2.2, viewport) }
-
-    /// Distance from the rail's left edge to the icon box.
-    ///
-    /// Constant in both states. It centres the icon in the collapsed rail, and
-    /// lands at very nearly the same proportional inset in the expanded panel as
-    /// the real client uses — so the icons do not move at all when the panel
-    /// opens; only the labels arrive.
-    private var iconLeading: CGFloat {
-        (Theme.Metrics.railCollapsed(viewport) - iconBox) / 2
-    }
-
-    @ViewBuilder
-    private func row(for item: RailItem) -> some View {
-        let isFocused = focusedItem == item
-        let isSelected = selected == item
-        let width = isExpanded ? Theme.Metrics.railPillWidth(viewport) : iconBox
-
-        HStack(spacing: Theme.Metrics.rem(0.75, viewport)) {
-            icon(for: item, size: Theme.Metrics.railIconSize(viewport))
-                .frame(width: iconBox, height: iconBox)
-
-            // Always present, never inserted or removed: conditionally adding
-            // the label made the HStack re-lay-out mid-animation, so the icons
-            // jumped as the panel opened. Here it keeps its natural width and is
-            // revealed by the row's width growing past it.
-            Text(label(for: item))
-                .font(.system(size: Theme.Metrics.railLabelSize(viewport),
-                              weight: isSelected ? .semibold : .regular))
-                .lineLimit(1)
-                .fixedSize()
-                .opacity(isExpanded ? 1 : 0)
-        }
-        .foregroundStyle(isFocused ? .black : (isSelected ? Theme.textPrimary : Theme.textTertiary))
-        // Sized from the icon box outward, so the collapsed indicator is a
-        // circle that wraps the glyph rather than a rectangle cropped by the
-        // rail's edge.
-        .frame(width: width, height: iconBox, alignment: .leading)
-        .clipped()
-        // A rounded square collapsed, a rounded rectangle expanded — the shape
-        // the real client uses. A capsule reads as a pill button and looked
-        // wrong around a single glyph.
-        .background {
-            if isSelected && !isFocused {
-                RoundedRectangle(cornerRadius: Theme.Metrics.railPillCorner(viewport),
-                                 style: .continuous)
-                    .fill(Theme.control.opacity(0.75))
-            }
-        }
-        .glassEffect(isFocused ? .regular.tint(.white.opacity(0.20)).interactive() : .identity,
-                     in: .rect(cornerRadius: Theme.Metrics.railPillCorner(viewport)))
-        .glassEffectID("rail.selection", in: glass)
-        .padding(.leading, iconLeading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     @ViewBuilder
     private func icon(for item: RailItem, size: CGFloat) -> some View {
         switch item {
         case .account:
-            AvatarView(url: accountAvatarURL, fallbackSymbol: "person.crop.circle", size: Theme.Metrics.avatarSize(viewport))
+            AvatarView(url: accountAvatarURL, fallbackSymbol: "person.crop.circle",
+                       size: Theme.Metrics.avatarSize(viewport))
         case let .channel(id):
             AvatarView(url: channels.first { $0.id == id }?.thumbnailURL,
-                       fallbackSymbol: "person.circle", size: Theme.Metrics.avatarSize(viewport))
+                       fallbackSymbol: "person.circle",
+                       size: Theme.Metrics.avatarSize(viewport))
         default:
             Image(systemName: symbol(for: item))
-                .font(.system(size: size, weight: .medium))
+                .font(.system(size: size, weight: .regular))
         }
     }
 
@@ -210,32 +184,34 @@ struct GuideRail: View {
         case let .channel(id): channels.first { $0.id == id }?.title ?? "Channel"
         case .subscriptions: "Subscriptions"
         case .library:       "Library"
-        case .news:          "News"
-        case .live:          "Live"
-        case .podcasts:      "Podcasts"
         case .music:         "Music"
         case .gaming:        "Gaming"
+        case .live:          "Live"
+        case .news:          "News"
+        case .podcasts:      "Podcasts"
         case .sports:        "Sports"
         case .settings:      "Settings"
         }
     }
 
+    /// Outline symbols, not the `.fill` variants — the real guide's icons are
+    /// thin strokes.
     private func symbol(for item: RailItem) -> String {
         switch item {
         case .account:       "person.crop.circle"
         case .search:        "magnifyingglass"
-        case .home:          "house.fill"
-        case .shorts:        "play.rectangle.on.rectangle.fill"
+        case .home:          "house"
+        case .shorts:        "play.rectangle.on.rectangle"
         case .channel:       "person.circle"
-        case .subscriptions: "play.square.stack.fill"
-        case .library:       "rectangle.stack.fill"
-        case .news:          "newspaper.fill"
-        case .live:          "dot.radiowaves.left.and.right"
-        case .podcasts:      "mic.fill"
+        case .subscriptions: "play.square.stack"
+        case .library:       "rectangle.stack"
         case .music:         "music.note"
-        case .gaming:        "gamecontroller.fill"
-        case .sports:        "trophy.fill"
-        case .settings:      "gearshape.fill"
+        case .gaming:        "gamecontroller"
+        case .live:          "dot.radiowaves.left.and.right"
+        case .news:          "newspaper"
+        case .podcasts:      "mic"
+        case .sports:        "trophy"
+        case .settings:      "gearshape"
         }
     }
 }

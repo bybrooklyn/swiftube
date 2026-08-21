@@ -27,10 +27,18 @@ struct YouTubeTVApp: App {
                 .frame(minWidth: 1280, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
-        // A TV app has no document model and no secondary windows; leaving the
-        // default New Window / tabbing commands in place would let a stray
-        // keystroke open a second copy with its own feed and its own player.
-        .commandsRemoved()
+        // Targeted removals, NOT `.commandsRemoved()`.
+        //
+        // `.commandsRemoved()` strips *every* menu command — including Quit —
+        // which left Force Quit as the only way out of the app. A TV app still
+        // has no document model and no secondary windows, so those groups go;
+        // app termination stays.
+        .commands {
+            CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .sidebar) { }
+            CommandGroup(replacing: .toolbar) { }
+            CommandGroup(replacing: .help) { }
+        }
     }
 }
 

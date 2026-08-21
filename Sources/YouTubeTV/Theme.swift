@@ -20,11 +20,10 @@ enum Theme {
     //
     // Sampled directly from the reference rather than eyeballed.
 
-    /// The page behind everything — pure black, not off-black.
-    static let canvas = Color.black
-    /// The expanded guide panel. (This is the value often mistaken for the page
-    /// background; the page itself is #000.)
-    static let guidePanel = Color(hex: 0x0F0F0F)
+    /// The page behind everything. Sampled from the real client: #0F0F0F, not
+    /// pure black — and the expanded guide is the *same* colour, so there is no
+    /// separate panel shade.
+    static let canvas = Color(hex: 0x0F0F0F)
     /// Unloaded thumbnail placeholder.
     static let surface = Color(hex: 0x212121)
     /// Search pill, transport buttons and pills, resolution badges.
@@ -89,16 +88,24 @@ enum Theme {
         // MARK: Guide
 
         static func railCollapsed(_ s: CGSize) -> CGFloat { rem(6.5, s) }
-        static func railExpanded(_ s: CGSize) -> CGFloat { rem(17.5, s) }
+        static func railExpanded(_ s: CGSize) -> CGFloat { rem(22.25, s) }
         /// How far content slides right when the guide opens. The guide pushes
         /// content; it does not overlay it.
-        static func guidePush(_ s: CGSize) -> CGFloat { rem(12, s) }
-        static func railItemHeight(_ s: CGSize) -> CGFloat { rem(2.6, s) }
-        static func railPillWidth(_ s: CGSize) -> CGFloat { rem(15.5, s) }
-        static func railPillCorner(_ s: CGSize) -> CGFloat { rem(0.75, s) }
-        static func railIconSize(_ s: CGSize) -> CGFloat { rem(1.25, s) }
-        static func railLabelSize(_ s: CGSize) -> CGFloat { rem(1.05, s) }
-        static func avatarSize(_ s: CGSize) -> CGFloat { rem(1.8, s) }
+        static func guidePush(_ s: CGSize) -> CGFloat { rem(15.75, s) }
+        static func railItemHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
+        static func railPillWidth(_ s: CGSize) -> CGFloat { rem(18.5, s) }
+        static func railPillCorner(_ s: CGSize) -> CGFloat { rem(0.6, s) }
+        static func railPillHeight(_ s: CGSize) -> CGFloat { rem(2.79, s) }
+        /// Left edge of the selection shape, and of the dividers.
+        static func railPillLeading(_ s: CGSize) -> CGFloat { rem(1.42, s) }
+        /// Centre of the icon column — identical collapsed and expanded, which
+        /// is why the icons do not move when the guide opens.
+        static func railIconCentre(_ s: CGSize) -> CGFloat { rem(3.25, s) }
+        /// Where labels begin.
+        static func railLabelLeading(_ s: CGSize) -> CGFloat { rem(5.08, s) }
+        static func railIconSize(_ s: CGSize) -> CGFloat { rem(1.5, s) }
+        static func railLabelSize(_ s: CGSize) -> CGFloat { rem(1.4, s) }
+        static func avatarSize(_ s: CGSize) -> CGFloat { rem(2.33, s) }
 
         // MARK: Player
 

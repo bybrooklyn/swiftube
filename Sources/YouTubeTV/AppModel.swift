@@ -72,6 +72,19 @@ final class AppModel {
 
     var shelves: [Shelf] {
         if let channelFeed { return [channelFeed] }
+
+        // A category surface returns exactly one group, and its title is
+        // whatever the fetcher produced. Those fetchers fall back to a plain
+        // search when their browseId comes back empty, so the group arrives
+        // named "Search: music" — which is the wrong title showing on those
+        // pages. The section knows its own name; use it.
+        if browse.videoGroups.count == 1, selectedRailItem != .home,
+           let group = browse.videoGroups.first {
+            return [Shelf(id: "section-\(browse.currentSection.id)",
+                          title: browse.currentSection.title,
+                          videos: group.videos)]
+        }
+
         return browse.videoGroups.enumerated().map { index, group in
             Shelf(
                 // Index is part of the id because YouTube repeats shelf titles
