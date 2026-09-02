@@ -158,7 +158,7 @@ extension InnerTubeAPI {
             webBody["videoId"] = videoId
             let tvData  = try await postTV(endpoint: "next", body: tvBody)
             let webData = try await post(endpoint: "next", body: webBody)
-            let videos   = parseRelatedVideos(from: webData)   // WEB client has compactVideoRenderer; TV client does not
+            let videos   = parseRelatedVideos(from: webData)   // WEB carries the richer secondary column; TV omits it
             let status   = parseLikeStatus(from: tvData)
             let chapters = parseChapters(from: webData)
             tubeLog.notice("fetchNextInfo (auth) → related=\(videos.count, privacy: .public) chapters=\(chapters.count, privacy: .public)")
@@ -237,21 +237,55 @@ extension InnerTubeAPI {
     }
 
     /// Parses related / suggested videos from a `/next` response.
-    /// Related videos appear as `compactVideoRenderer` in `secondaryResults`.
+    ///
+    /// Three shapes, because YouTube migrated the watch page's secondary column
+    /// mid-flight and the two clients we ask are on opposite sides of it:
+    ///
+    /// * `compactVideoRenderer` — the classic WEB shape. Kept because the TV
+    ///   client still emits it, and because a WEB response can regress to it.
+    /// * `lockupViewModel` — what WEB actually returns now. Verified against a
+    ///   live `/next` on 2026-08-21: the response carried **20** `lockupViewModel`
+    ///   and **zero** `compactVideoRenderer`, so the old single-shape parser found
+    ///   nothing and the up-next rail was empty on every video.
+    /// * `shortsLockupViewModel` — related Shorts, which arrive inside a
+    ///   `reelShelfRenderer` in the same list. Parsed with `isShort` set so
+    ///   `hideShorts` can filter them; dropping them here instead would hide them
+    ///   from a caller that wants them.
+    ///
+    /// Parsers for the latter two already existed for the home feed; this only
+    /// reaches them. Results are deduped by video id and kept in document order —
+    /// that order is YouTube's ranking, and it is what autoplay walks.
     private func parseRelatedVideos(from json: [String: Any]) -> [Video] {
         var videos: [Video] = []
+        var seen: Set<String> = []
         var rendererKeysFound: Set<String> = []
+
+        func append(_ video: Video?) -> Bool {
+            guard let video else { return false }
+            guard seen.insert(video.id).inserted else { return true }
+            videos.append(video)
+            return true
+        }
+
         func walk(_ obj: Any, depth: Int = 0) {
             guard depth < 50 else { return }
             if let dict = obj as? [String: Any] {
                 // Collect any *Renderer keys for diagnostics
                 for k in dict.keys where k.hasSuffix("Renderer") { rendererKeysFound.insert(k) }
+
                 if let r = dict["compactVideoRenderer"] as? [String: Any],
-                   let v = parseVideoRenderer(r) {
-                    videos.append(v)
-                } else {
-                    for value in dict.values { walk(value, depth: depth + 1) }
+                   append(parseVideoRenderer(r)) {
+                    return
                 }
+                if let r = dict["lockupViewModel"] as? [String: Any],
+                   append(parseLockupViewModel(r)) {
+                    return
+                }
+                if let r = dict["shortsLockupViewModel"] as? [String: Any],
+                   append(parseShortsLockupViewModel(r)) {
+                    return
+                }
+                for value in dict.values { walk(value, depth: depth + 1) }
             } else if let arr = obj as? [Any] {
                 for item in arr { walk(item, depth: depth + 1) }
             }

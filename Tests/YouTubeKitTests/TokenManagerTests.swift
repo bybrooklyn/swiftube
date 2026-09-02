@@ -107,4 +107,24 @@ struct TokenManagerTests {
             Issue.record("Expected .signedOut, got \(String(describing: update))")
         }
     }
+
+    // MARK: - 5. Stream emits .sapisidChanged on setSAPISID
+
+    @Test("updates stream emits .sapisidChanged when setSAPISID is called")
+    func streamEmitsSAPISIDChanged() async throws {
+        let tm = TokenManager(keychainService: "test-tm-sapisid-\(UUID().uuidString)")
+        let task = Task<TokenManager.Update?, Never> {
+            for await update in tm.updates { return update }
+            return nil
+        }
+        await Task.yield()
+        await tm.setSAPISID("cookie-1")
+        let update = await task.value
+        if case .sapisidChanged(let value) = update {
+            #expect(value == "cookie-1")
+        } else {
+            Issue.record("Expected .sapisidChanged, got \(String(describing: update))")
+        }
+        await tm.clearToken()
+    }
 }

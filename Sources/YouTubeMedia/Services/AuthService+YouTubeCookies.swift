@@ -42,13 +42,15 @@ extension AuthService {
         // scope is present. Required for the MultiBearer Multilogin request format.
         if let infoURL = URL(string: "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=\(token)"),
            let (infoData, _) = try? await URLSession.shared.data(from: infoURL) {
-            let infoStr = String(data: infoData, encoding: .utf8) ?? "<non-UTF8>"
-            authLog.notice("[cookies] tokeninfo=\(infoStr)")
+            // The tokeninfo body carries the Gaia `sub`, the granted scopes and the
+            // client it was issued to. It used to be logged whole and unredacted;
+            // its size is all that is useful for debugging.
+            authLog.notice("[cookies] tokeninfo received (\(infoData.count) bytes)")
             // Extract gaiaId from `sub` claim (only present when openid scope is in token)
             if let infoJSON = try? JSONSerialization.jsonObject(with: infoData) as? [String: Any],
                let sub = infoJSON["sub"] as? String, !sub.isEmpty {
                 gaiaId = sub
-                authLog.notice("[cookies] gaiaId=\(sub) — MultiBearer Multilogin enabled")
+                authLog.noticeSensitive("[cookies] gaiaId=\(sub) — MultiBearer Multilogin enabled")
             } else {
                 authLog.notice("[cookies] gaiaId not in tokeninfo — token missing openid scope; need re-sign-in")
             }
@@ -124,7 +126,7 @@ extension AuthService {
         // gaiaId is the numeric Gaia ID (OIDC `sub` claim) from tokeninfo when openid scope is present.
         if let gid = gaiaId, !gid.isEmpty {
             request.setValue("MultiBearer \(token):\(gid)", forHTTPHeaderField: "Authorization")
-            authLog.notice("[cookies] Multilogin MultiBearer with gaiaId=\(gid)")
+            authLog.noticeSensitive("[cookies] Multilogin MultiBearer with gaiaId=\(gid)")
         } else {
             // Fallback: old Bearer format — likely to fail (INVALID_INPUT) without gaiaId.
             // User must sign out + sign in to get an openid-scoped token.
@@ -146,8 +148,9 @@ extension AuthService {
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // A Multilogin error body echoes the request, including the bearer.
             let body = String(data: data, encoding: .utf8) ?? "<non-UTF8>"
-            authLog.notice("[cookies] Multilogin HTTP \(code) body=\(body) — SAPISID via Multilogin unavailable")
+            authLog.noticeSensitive("[cookies] Multilogin HTTP \(code) body=\(body) — SAPISID via Multilogin unavailable")
             return
         }
 

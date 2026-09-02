@@ -205,7 +205,8 @@ public struct PlayerInfo: Sendable {
                 fps: fmt.fps,
                 mimeType: fmt.mimeType,
                 url: append(fmt.url),
-                bitrate: fmt.bitrate
+                bitrate: fmt.bitrate,
+                isHDR: fmt.isHDR
             )
         }
         return PlayerInfo(

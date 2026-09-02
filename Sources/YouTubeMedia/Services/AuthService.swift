@@ -78,6 +78,18 @@ public final class AuthService {
     // sign-in fails entirely. Removed. The Multilogin path remains blocked.
     var scope = "openid http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content https://www.googleapis.com/auth/youtube"
     private var tokenRefreshTask: Task<Void, Never>?
+    /// The refresh currently POSTing /token, if any. Callers that arrive while
+    /// it is in flight await it instead of starting a second one — see
+    /// `refreshAccessToken`.
+    var refreshInFlight: Task<Void, Error>?
+
+    /// Bumped whenever the auth session is torn down or replaced (signOut,
+    /// clearSession, a new beginSignIn). An in-flight refresh/exchange captures
+    /// the epoch before its network await and re-checks it after resuming;
+    /// on mismatch the response is discarded instead of applied and persisted —
+    /// persisting it after signOut resurrected cleared credentials (the save
+    /// Task landed on TokenManager after the clear Task).
+    var authEpoch = 0
 
     // State persisted across foreground/background transitions so that the
     // poll loop can be restarted without re-requesting a device code.
@@ -137,6 +149,10 @@ public final class AuthService {
         }
         isSigningIn = true
         defer { isSigningIn = false }
+        // Invalidate any in-flight exchange from a previous attempt before its
+        // poll task is cancelled — the cancel does not stop an exchange that is
+        // already suspended at its network await.
+        authEpoch += 1
         pollTask?.cancel()
         error = nil
         pendingActivation = nil
@@ -178,6 +194,7 @@ public final class AuthService {
 
     /// Cancel an in-progress activation.
     public func cancelSignIn() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         pendingActivation = nil
@@ -217,6 +234,7 @@ public final class AuthService {
     }
 
     public func signOut() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         tokenRefreshTask?.cancel()
@@ -230,12 +248,37 @@ public final class AuthService {
         isSignedIn       = false
         pendingActivation = nil
         clearKeychain()
+        // The MergeSession step of the cookie fetch leaves the account's
+        // youtube.com session cookies in the shared jar, and every proxied
+        // segment request reads from it — so the signed-out account kept
+        // riding along on every stream until the next launch.
+        clearCookies()
+    }
+
+    /// Wipes both cookie stores: URLSession's shared jar and WKWebView's.
+    func clearCookies() {
+        if let cookies = HTTPCookieStorage.shared.cookies {
+            for cookie in cookies {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+        // WKWebsiteDataStore is only available where WebKit ships (iOS, macOS,
+        // visionOS, iPadOS). tvOS has no WebKit framework at all, so skip the
+        // WKWebView-side cookie wipe there — the URLSession/HTTPCookieStorage
+        // wipe above is the only one that exists.
+        #if canImport(WebKit)
+        let dataStore = WKWebsiteDataStore.default()
+        dataStore.removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: Date(timeIntervalSince1970: 0)) {
+            authLog.notice("[clearCookies] WKWebsiteDataStore cookies removed")
+        }
+        #endif
     }
 
     /// Clears the in-memory auth session without touching the keychain.
     /// Used by `--uitesting-sign-out` so UI tests can verify signed-out UI on a
     /// simulator that has real credentials stored in the keychain.
     public func clearSession() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         tokenRefreshTask?.cancel()
@@ -261,24 +304,8 @@ public final class AuthService {
         // Wipe both cookie stores (URLSession's binarycookies + WKWebView's
         // origin index). Without this, the IFrame would still see stale
         // cookies from the previous sign-in.
-        if let cookies = HTTPCookieStorage.shared.cookies {
-            for cookie in cookies {
-                HTTPCookieStorage.shared.deleteCookie(cookie)
-            }
-        }
-        // WKWebsiteDataStore is only available where WebKit ships (iOS, macOS,
-        // visionOS, iPadOS). tvOS has no WebKit framework at all, so skip the
-        // WKWebView-side cookie wipe there — the URLSession/HTTPCookieStorage
-        // wipe above is the only one that exists.
-        #if canImport(WebKit)
-        let dataStore = WKWebsiteDataStore.default()
-        dataStore.removeData(ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: Date(timeIntervalSince1970: 0)) {
-            authLog.notice("[clearAllForTest] WKWebsiteDataStore cookies removed")
-        }
-        authLog.notice("[clearAllForTest] cleared in-memory + keychain + HTTPCookieStorage + WKWebsiteDataStore")
-        #else
-        authLog.notice("[clearAllForTest] cleared in-memory + keychain + HTTPCookieStorage (no WebKit on this platform)")
-        #endif
+        clearCookies()
+        authLog.notice("[clearAllForTest] cleared in-memory + keychain + cookies")
     }
 
     /// Returns a valid access token, refreshing if necessary.

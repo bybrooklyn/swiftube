@@ -19,6 +19,7 @@ public actor TokenManager {
 
     public enum Update: Sendable {
         case refreshed(token: String?, expiresAt: Date?)
+        case sapisidChanged(String?)
         case signedOut
     }
 
@@ -121,6 +122,10 @@ public actor TokenManager {
     public func setSAPISID(_ value: String?) {
         sapisid = value
         Self.kcSet(service: service, key: "st_sapisid", value: value)
+        // The cookie arrives seconds after sign-in completes, once the
+        // OAuthLogin/Multilogin exchange finishes. Without this yield the only
+        // mutator that fires late was also the only one nobody could hear.
+        continuation?.yield(.sapisidChanged(value))
     }
 
     public func clearToken() {
@@ -137,12 +142,21 @@ public actor TokenManager {
     // MARK: - Private Keychain I/O
 
     private func persistToKeychain() {
+        // One load → one mutate → one atomic save. The previous version ran a
+        // full-file read-modify-write per key, so a crash between writes left a
+        // mismatched pair on disk (e.g. new access token with the old refresh
+        // token) — a state that silently fails on next launch's refresh.
+        var values = Self.load()
+        func set(_ key: String, _ value: String?) {
+            if let value { values[key] = value } else { values.removeValue(forKey: key) }
+        }
         let fmt = ISO8601DateFormatter()
-        Self.kcSet(service: service, key: "st_access_token",  value: accessToken)
-        Self.kcSet(service: service, key: "st_refresh_token", value: refreshToken)
-        Self.kcSet(service: service, key: "st_token_expiry",  value: tokenExpiry.map { fmt.string(from: $0) })
-        Self.kcSet(service: service, key: "st_account_name",  value: accountName)
-        Self.kcSet(service: service, key: "st_avatar_url",    value: accountAvatarURL?.absoluteString)
+        set("st_access_token",  accessToken)
+        set("st_refresh_token", refreshToken)
+        set("st_token_expiry",  tokenExpiry.map { fmt.string(from: $0) })
+        set("st_account_name",  accountName)
+        set("st_avatar_url",    accountAvatarURL?.absoluteString)
+        Self.save(values)
     }
 
     private func deleteFromKeychain() {

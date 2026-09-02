@@ -31,8 +31,7 @@ struct VideoDiskCacheTests {
             chapters: []
         )
         cache.store(original, videoId: "abc123", dataType: "nextInfo")
-        // The write is async on the serial queue — wait briefly
-        try await Task.sleep(nanoseconds: 100_000_000)  // 100 ms
+        cache.waitForPendingWrites()
         let loaded = cache.load(NextInfo.self, videoId: "abc123", dataType: "nextInfo")
         #expect(loaded != nil)
         #expect(loaded?.relatedVideos.count == 1)
@@ -45,7 +44,7 @@ struct VideoDiskCacheTests {
         let cache = makeTempCache()
         let segments = [SponsorSegment(start: 1.0, end: 5.0, category: .sponsor)]
         cache.store(segments, videoId: "seg1", dataType: "sponsorSegments")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        cache.waitForPendingWrites()
         let loaded = cache.load([SponsorSegment].self, videoId: "seg1", dataType: "sponsorSegments")
         #expect(loaded?.count == 1)
         #expect(loaded?.first?.start == 1.0)
@@ -62,7 +61,7 @@ struct VideoDiskCacheTests {
             startMs: 50000, endMs: 60000
         )
         cache.store([card], videoId: "endcards1", dataType: "endCards")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        cache.waitForPendingWrites()
         let loaded = cache.load([EndCard].self, videoId: "endcards1", dataType: "endCards")
         #expect(loaded?.count == 1)
         #expect(loaded?.first?.id == "card1")
@@ -74,7 +73,7 @@ struct VideoDiskCacheTests {
         let cache = makeTempCache()
         let branding = DeArrowService.BrandingInfo(title: "Better Title", thumbnailTimestamp: 42.5)
         cache.store(branding, videoId: "dearrow1", dataType: "deArrowBranding")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        cache.waitForPendingWrites()
         let loaded = cache.load(DeArrowService.BrandingInfo.self, videoId: "dearrow1", dataType: "deArrowBranding")
         #expect(loaded?.title == "Better Title")
         #expect(loaded?.thumbnailTimestamp == 42.5)

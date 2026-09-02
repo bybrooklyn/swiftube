@@ -117,6 +117,16 @@ public struct Chapter: Identifiable, Hashable, Sendable, Codable {
 
 // MARK: - Convenience helpers
 
+public extension Array where Element == Video {
+    /// Duplicate IDs removed, first occurrence kept. YouTube repeats videos
+    /// across shelves and continuation pages, and a repeated id makes SwiftUI's
+    /// `ForEach` drop or alias cards.
+    func deduplicatedByID() -> [Video] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.id).inserted }
+    }
+}
+
 public extension Video {
     var formattedDuration: String {
         guard let duration else { return "" }

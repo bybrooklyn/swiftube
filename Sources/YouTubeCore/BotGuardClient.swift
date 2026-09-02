@@ -290,7 +290,7 @@ public final class BotGuardClient: PoTokenProvider, @unchecked Sendable {
 
     /// Reads a protobuf varint from `bytes` starting at `pos`.
     /// Returns (value, next_position) or nil on parse error / truncated input.
-    private static func readVarint(from bytes: [UInt8], at pos: Int) -> (UInt64, Int)? {
+    static func readVarint(from bytes: [UInt8], at pos: Int) -> (UInt64, Int)? {
         var result: UInt64 = 0
         var shift = 0
         var idx = pos
@@ -307,7 +307,7 @@ public final class BotGuardClient: PoTokenProvider, @unchecked Sendable {
     /// Parses a binary protobuf blob and returns a dict of `fieldNumber → raw Data`
     /// for every **length-delimited** (wire type 2) field encountered.
     /// Other wire types are skipped. Duplicate field numbers keep the last value.
-    private static func readProtoFields(_ data: Data) -> [Int: Data] {
+    static func readProtoFields(_ data: Data) -> [Int: Data] {
         let bytes = [UInt8](data)
         var pos = 0
         var fields: [Int: Data] = [:]

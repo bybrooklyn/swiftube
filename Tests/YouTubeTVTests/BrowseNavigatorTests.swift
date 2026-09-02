@@ -283,4 +283,65 @@ struct BrowseNavigatorTests {
         let empty = BrowseLayout(shelfSizes: [])
         #expect(BrowseNavigator.clamped(.rail(.subscriptions), to: empty) == .rail(.subscriptions))
     }
+
+    // MARK: - Clamping from a shelf index past the end
+
+    // These are the cases `clamped` is actually called for: the focused shelf no
+    // longer exists because the surface changed under the user (Library's three
+    // shelves → a category's one). The backwards search used to subscript every
+    // index below the *old* shelf number against the *new*, shorter array.
+
+    @Test("a focused shelf past the end falls back to the last real shelf")
+    func focusPastTheEndFallsBack() {
+        let shrunk = BrowseLayout(shelfSizes: [3])
+        #expect(BrowseNavigator.clamped(.card(shelf: 2, index: 0), to: shrunk)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end skips empty shelves on the way back")
+    func focusPastTheEndSkipsEmptyShelves() {
+        let shrunk = BrowseLayout(shelfSizes: [4, 0])
+        #expect(BrowseNavigator.clamped(.card(shelf: 7, index: 3), to: shrunk)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end of an empty layout lands on the default")
+    func focusPastTheEndOfEmptyLayout() {
+        let empty = BrowseLayout(shelfSizes: [])
+        #expect(BrowseNavigator.clamped(.card(shelf: 3, index: 1), to: empty)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end of an all-empty layout lands on the default")
+    func focusPastTheEndOfAllEmptyLayout() {
+        let allEmpty = BrowseLayout(shelfSizes: [0, 0])
+        #expect(BrowseNavigator.clamped(.card(shelf: 5, index: 0), to: allEmpty)
+                == .card(shelf: 0, index: 0))
+    }
+
+    // MARK: - Clamping the Subscribe button
+
+    @Test("subscribe focus survives while the channel header is up")
+    func subscribeSurvivesWithHeader() {
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: channelLayout)
+                == .topBar(.subscribe))
+    }
+
+    @Test("subscribe focus falls back to the search bar when the header goes away")
+    func subscribeFallsBackWhenHeaderGoes() {
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: layout)
+                == .topBar(.search))
+    }
+
+    @Test("subscribe focus falls back to the content when there is no top bar either")
+    func subscribeFallsBackWithoutTopBar() {
+        let bare = BrowseLayout(shelfSizes: [2], hasTopBar: false)
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: bare)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("the search bar still survives a layout change that keeps the top bar")
+    func searchSurvivesLayoutChange() {
+        #expect(BrowseNavigator.clamped(.topBar(.search), to: layout) == .topBar(.search))
+    }
 }

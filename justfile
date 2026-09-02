@@ -10,7 +10,19 @@ clt_frameworks := "/Library/Developer/CommandLineTools/Library/Developer/Framewo
 test_flags := "-Xswiftc -F -Xswiftc " + clt_frameworks + \
               " -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlay-search" + \
               " -Xlinker -F -Xlinker " + clt_frameworks + \
-              " -Xlinker -rpath -Xlinker " + clt_frameworks
+              " -Xlinker -rpath -Xlinker " + clt_frameworks + \
+              " -Xlinker -rpath -Xlinker " + clt_frameworks + "/../usr/lib"
+# The second rpath is for lib_TestingInterop.dylib, which Swift 6.4's Testing
+# framework loads at runtime from Library/Developer/usr/lib — not next to the
+# framework, and not anywhere dyld looks on its own.
+
+# Swift 6.4's Command Line Tools broke two things at once. SwiftPM now defaults
+# to the `swiftbuild` backend, which compiles Localizable.xcstrings with
+# Xcode's xcstringstool — not in the CLT. And the macOS 27 SDK makes SwiftUI's
+# @State a macro whose plugin (SwiftUIMacros) also ships only with Xcode. The
+# native backend plus the previous SDK sidestep both. build-app.sh mirrors this.
+export SDKROOT := "/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+build_system := "--build-system native"
 
 # List available recipes.
 default:
@@ -18,13 +30,13 @@ default:
 
 # Compile everything.
 build:
-    swift build
+    swift build {{build_system}}
 
 check:
-    swift build
+    swift build {{build_system}}
 
 build-release:
-    swift build -c release
+    swift build -c release {{build_system}}
 
 # --no-parallel is required, not a preference: these suites are inherited from
 # SmartTubeIOS, where an Xcode test plan ran them serially. Several share global
@@ -33,7 +45,7 @@ build-release:
 
 # Run the full test suite (serially — see above).
 test:
-    swift test --no-parallel {{test_flags}}
+    swift test --no-parallel {{build_system}} {{test_flags}}
 
 # One-time: create a stable local signing identity so the Keychain keeps trusting
 # the app (and your Google sign-in) across rebuilds.

@@ -21,7 +21,7 @@ patterned on `../velachat`).
 - **`--no-parallel` is load-bearing.** The suites inherited from SmartTubeIOS
   share global singletons (`CurrentQueueStore`, the UserDefaults-backed stores).
   Run in parallel they fail a different random 1–4 tests every time, which looks
-  exactly like a real regression. Serially, all 803 pass, repeatably.
+  exactly like a real regression. Serially, all 904 pass, repeatably.
 
 ## Launching and verifying
 
@@ -117,9 +117,14 @@ the symptom will be playback that dies after a minute.
 
 - Focus logic belongs in `Sources/YouTubeTV/Focus/`, as pure functions over value
   types, with tests. Views render `focus`; they never decide where it goes next.
-- One spring — `Theme.focusSpring` — for every focus transition. A second curve
-  makes the surface read as several objects instead of one.
-- `.glassEffect(.clear, …)` is **not** "no glass"; it still draws a glass shape.
-  Apply the modifier conditionally instead (see `RailGlass`).
+- Two curves, and only two: `Theme.stateChange` (0.15 s ease-out) for a focus ring
+  or a colour change, `Theme.travel` (0.3 s) for a row or column actually moving.
+  Mixing in a third makes the surface read as several objects instead of one.
+  (An earlier version of this file named `Theme.focusSpring`, `.glassEffect` and
+  `RailGlass`. None of those survived the rebuild in `f27381e` — do not go looking
+  for them.)
+- Liquid Glass is available but is used sparingly, and never as an empty wrapper:
+  `GlassEffectContainer` only earns its render pass when a child actually applies
+  `.glassEffect`. See the note at `GuideRail.swift:47`.
 - Do not put full-width glass over playing video. The player's control bar uses a
   gradient scrim and keeps glass for the small button cluster.

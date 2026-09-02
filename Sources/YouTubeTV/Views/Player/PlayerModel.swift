@@ -20,8 +20,14 @@ final class PlayerModel {
 
     /// Takes the app's shared `InnerTubeAPI` so playback runs on the same
     /// session identity as browsing — see the note on `AppModel.api`.
-    init(api: InnerTubeAPI) {
+    /// Whether the account follows a channel. Answered by `AppModel` from the
+    /// guide's subscription list; the button used to reset to "not subscribed"
+    /// on every play with nothing ever fetching the real state.
+    @ObservationIgnored private let isSubscribedTo: (String) -> Bool
+
+    init(api: InnerTubeAPI, isSubscribedTo: @escaping (String) -> Bool = { _ in false }) {
         self.api = api
+        self.isSubscribedTo = isSubscribedTo
         self.playback = PlaybackViewModel(api: api)
     }
 
@@ -64,10 +70,39 @@ final class PlayerModel {
     private(set) var isSubscribed = false
     private(set) var isSaved = false
 
+    /// Non-nil scroll offset while the description panel is up; nil when closed.
+    /// Shaped like `commentIndex` so the two panels behave identically.
+    private(set) var descriptionScroll: Int?
+    var isDescriptionOpen: Bool { descriptionScroll != nil }
+
+    /// The description text, cleaned of the trailing whitespace YouTube leaves.
+    var descriptionText: String {
+        (playback.currentVideo?.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isStatsVisible: Bool { playback.statsForNerdsVisible }
+
+    /// True once the retry ladder has given up: not loading, and an error is set.
+    var hasFailed: Bool { !playback.isLoading && playback.error != nil }
+
     @ObservationIgnored private var hideTask: Task<Void, Never>?
 
-    /// How long the controls stay up after the last input.
-    private let autoHideDelay: Duration = .seconds(4)
+    /// How long the controls stay up after the last input. Settings offers this as
+    /// "Controls timeout"; it used to be hardcoded here, so the setting did nothing.
+    private var autoHideDelay: Duration { .seconds(max(1, playback.settings.controlsHideTimeout)) }
+
+    /// Seeks by the interval the user chose in Settings.
+    ///
+    /// Both intervals were hardcoded to 10 s at all four call sites, so the two
+    /// Settings rows were decorative — and the forward default is 30 s, so the
+    /// value shown there disagreed with the player out of the box.
+    private func seek(_ direction: SeekDirection) {
+        let settings = playback.settings
+        let seconds = direction == .forward
+            ? Double(settings.seekForwardSeconds)
+            : -Double(settings.seekBackSeconds)
+        playback.seekRelative(seconds: seconds)
+    }
 
     var title: String { playback.currentVideo?.title ?? "" }
     var channel: String { playback.currentVideo?.channelTitle ?? "" }
@@ -107,6 +142,7 @@ final class PlayerModel {
     func play(_ video: Video) {
         upNextIndex = nil
         commentIndex = nil
+        descriptionScroll = nil
         comments = []
         isSubscribed = false
         isSaved = false
@@ -121,6 +157,8 @@ final class PlayerModel {
     /// straight through `PlaybackViewModel`, so the title and metadata updated
     /// while the avatar kept showing the previous video's channel.
     func loadChannelAvatar(for channelId: String?) {
+        // Before the same-channel guard: `play()` reset the flag already.
+        isSubscribed = channelId.map(isSubscribedTo) ?? false
         guard channelId != avatarChannelId else { return }
         avatarChannelId = channelId
         channelAvatarURL = nil
@@ -143,13 +181,44 @@ final class PlayerModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
+        // A failed load owns every press: Select retries, anything else leaves.
+        // `retryLoad()` had no caller at all before this, so the ladder's own
+        // recovery path was unreachable from the UI.
+        if hasFailed {
+            switch intent {
+            case .select:  playback.retryLoad()
+            case .back:    close()
+            default:       break
+            }
+            return
+        }
+
+        if let scroll = descriptionScroll {
+            switch intent {
+            case .move(.up):
+                withAnimation(Theme.travel) { descriptionScroll = max(0, scroll - 1) }
+            case .move(.down):
+                withAnimation(Theme.travel) { descriptionScroll = scroll + 1 }
+            case .move(.left), .move(.right), .select:
+                break
+            case .back, .menu:
+                closeDescription()
+            case .playPause:
+                playback.togglePlayPause()
+            case let .seek(direction):
+                seek(direction)
+            }
+            showControls()
+            return
+        }
+
         if let menu {
             switch intent {
             case let .move(direction): menu.move(direction)
-            case .select:              _ = menu.select()
+            case .select:              menu.select()
             case .back, .menu:         closeMenu()
             case .playPause:           playback.togglePlayPause()
-            case let .seek(direction): playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+            case let .seek(direction): seek(direction)
             }
             showControls()
             return
@@ -168,7 +237,7 @@ final class PlayerModel {
             case .playPause:
                 playback.togglePlayPause()
             case let .seek(direction):
-                playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+                seek(direction)
             }
             showControls()
             return
@@ -193,7 +262,7 @@ final class PlayerModel {
             case .playPause:
                 playback.togglePlayPause()
             case let .seek(direction):
-                playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+                seek(direction)
             case .menu:
                 closeUpNext()
                 openMenu()
@@ -242,7 +311,7 @@ final class PlayerModel {
             playback.togglePlayPause()
 
         case let .seek(direction):
-            playback.seekRelative(seconds: direction == .forward ? 10 : -10)
+            seek(direction)
 
         case .menu:
             openMenu()
@@ -264,10 +333,20 @@ final class PlayerModel {
         case .comments:  openComments()
         case .subscribe: toggleSubscribe()
         case .save:      toggleSaved()
-        case .description, .stats:
-            // Still without a surface of their own.
-            break
+        case .description: openDescription()
+        case .stats:       playback.toggleStatsForNerds()
         }
+    }
+
+    private func openDescription() {
+        withAnimation(Theme.stateChange) { descriptionScroll = 0 }
+        cancelAutoHide()
+    }
+
+    private func closeDescription() {
+        withAnimation(Theme.stateChange) { descriptionScroll = nil }
+        focusedControl = .description
+        showControls()
     }
 
     private func openComments() {
@@ -366,10 +445,25 @@ final class PlayerModel {
             withAnimation(Theme.travel) { areControlsVisible = true }
         }
         hideTask?.cancel()
-        guard menu == nil else { return }
+        // Anything the user is currently navigating inside keeps the chrome up.
+        // Up-next and comments live *inside* the overlay this timer hides, so
+        // letting it fire while one was open left the selection invisible but still
+        // live — Select then played a video the user could not see.
+        guard menu == nil, upNextIndex == nil, commentIndex == nil, descriptionScroll == nil else { return }
         hideTask = Task { [weak self] in
-            try? await Task.sleep(for: self?.autoHideDelay ?? .seconds(4))
-            guard !Task.isCancelled, let self, self.playback.isPlaying, self.menu == nil else { return }
+            guard let self else { return }
+            try? await Task.sleep(for: self.autoHideDelay)
+            guard !Task.isCancelled else { return }
+            // Wait for playback to actually start before counting down. The guard
+            // used to be `playback.isPlaying` and simply exited when it failed —
+            // and nothing re-armed it — so on any video that took longer than the
+            // timeout to resolve the control bar stayed up for the whole video.
+            while !Task.isCancelled, !self.playback.isPlaying {
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            guard !Task.isCancelled, self.menu == nil, self.upNextIndex == nil,
+                  self.commentIndex == nil, self.descriptionScroll == nil
+            else { return }
             withAnimation(Theme.travel) { self.areControlsVisible = false }
         }
     }

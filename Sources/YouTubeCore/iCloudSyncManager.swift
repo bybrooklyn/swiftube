@@ -42,6 +42,18 @@ public actor iCloudSyncManager {
 
     private let kvStore = NSUbiquitousKeyValueStore.default
 
+    // MARK: - Observer tokens
+    //
+    // `addObserver(forName:object:queue:)` returns an opaque token and does **not**
+    // register `self`, so the matching removal is `removeObserver(_ token:)`.
+    // `handleIdentityChange` used the `removeObserver(self, name:object:)` overload
+    // instead, which was a no-op — every identity change therefore called
+    // `startSync()` again and stacked another external-change observer, duplicating
+    // each remote update.
+
+    private var identityObserver: (any NSObjectProtocol)?
+    private var externalChangeObserver: (any NSObjectProtocol)?
+
     // MARK: - External change stream
 
     private let (externalChanges, externalChangesContinuation) =
@@ -64,7 +76,8 @@ public actor iCloudSyncManager {
         guard FileManager.default.ubiquityIdentityToken != nil else {
             // No iCloud account on this device — register for identity changes so we
             // can start syncing if the user signs in while the app is running.
-            NotificationCenter.default.addObserver(
+            guard identityObserver == nil else { return }
+            identityObserver = NotificationCenter.default.addObserver(
                 forName: NSNotification.Name.NSUbiquityIdentityDidChange,
                 object: nil,
                 queue: nil
@@ -102,11 +115,12 @@ public actor iCloudSyncManager {
     // MARK: - Private
 
     private func startSync() {
+        guard externalChangeObserver == nil else { return }
         kvStore.synchronize()
         // Use the callback-based observer so the non-Sendable Notification.userInfo
         // is consumed synchronously (before any actor crossing). Only the extracted
         // [String] — a Sendable type — crosses into the actor via the Task.
-        NotificationCenter.default.addObserver(
+        externalChangeObserver = NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: nil,
             queue: nil
@@ -119,12 +133,12 @@ public actor iCloudSyncManager {
 
     private func handleIdentityChange() {
         guard FileManager.default.ubiquityIdentityToken != nil else { return }
-        // Account became available — remove the identity-change observer and start sync.
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSNotification.Name.NSUbiquityIdentityDidChange,
-            object: nil
-        )
+        // Account became available — remove the identity-change observer by token
+        // (the `self` overload never matched, so it never came off) and start sync.
+        if let identityObserver {
+            NotificationCenter.default.removeObserver(identityObserver)
+            self.identityObserver = nil
+        }
         startSync()
     }
 

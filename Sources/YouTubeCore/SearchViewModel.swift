@@ -1,6 +1,10 @@
 import Foundation
 import Observation
 
+// The suggestion tracing below used to be `print()` — which writes the user's
+// search query to stdout on every keystroke, in a shipped app.
+private let searchLog = ViewModelLogger(category: "Search")
+
 // MARK: - SearchViewModel
 //
 // Mirrors the Android `SearchPresenter`.
@@ -48,15 +52,15 @@ public final class SearchViewModel {
     /// Call from `.task(id: query)` in the view to debounce live suggestions.
     /// When `q` is empty, restores the recommended terms immediately.
     public func updateSuggestions(for q: String) async {
-        print("[Suggestions] updateSuggestions called, q='\(q)'")
+        searchLog.debug("[Suggestions] updateSuggestions called, q='\(q)'")
         if q.isEmpty {
-            print("[Suggestions] Empty query — restoring recommendedTerms")
+            searchLog.debug("[Suggestions] Empty query — restoring recommendedTerms")
             suggestions = Self.recommendedTerms
             return
         }
         try? await Task.sleep(for: .milliseconds(300))
         guard !Task.isCancelled else {
-            print("[Suggestions] Task cancelled before fetch")
+            searchLog.debug("[Suggestions] Task cancelled before fetch")
             return
         }
         fetchSuggestions(for: q)
@@ -135,20 +139,20 @@ public final class SearchViewModel {
     }
 
     private func fetchSuggestions(for query: String) {
-        print("[Suggestions] fetchSuggestions spawning task for q='\(query)'")
+        searchLog.debug("[Suggestions] fetchSuggestions spawning task for q='\(query)'")
         suggestTask?.cancel()
         suggestTask = Task {
             do {
                 let s = try await api.fetchSearchSuggestions(query: query)
                 guard !Task.isCancelled else {
-                    print("[Suggestions] Task cancelled after fetch")
+                    searchLog.debug("[Suggestions] Task cancelled after fetch")
                     return
                 }
                 let result = s.isEmpty ? Self.recommendedTerms : s
-                print("[Suggestions] Setting \(result.count) suggestions")
+                searchLog.debug("[Suggestions] Setting \(result.count) suggestions")
                 suggestions = result
             } catch {
-                print("[Suggestions] fetchSearchSuggestions threw: \(error)")
+                searchLog.debug("[Suggestions] fetchSearchSuggestions threw: \(error)")
                 if !Task.isCancelled { suggestions = Self.recommendedTerms }
             }
         }

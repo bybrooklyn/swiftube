@@ -238,6 +238,11 @@ public final class PlaybackViewModel {
 
     /// Videos played before the current one (oldest first).
     var history: [Video] = []
+    /// Set by `playPrevious()` for the `load(video:)` it issues, so that load
+    /// does not push the video being left back onto `history`. Without it
+    /// Previous popped A and pushed B, then popped B and pushed A — a
+    /// two-video ping-pong that never walked further back.
+    var isNavigatingBack = false
     /// The video currently loaded (nil before first load).
     /// `public` so the TV chrome in YouTubeTV can title itself; upstream kept it
     /// internal because its views lived in the same module.
@@ -542,7 +547,9 @@ extension PlaybackViewModel: QualityEventHandler {
         let seekTarget = currentTime > 0 ? currentTime : time
         playerLog.notice("[quality] readyToPlay — seekTarget=\(seekTarget)s (currentTime=\(currentTime)s savedTime=\(time)s)")
         if seekTarget > 0 { seek(to: seekTarget) }
-        isPlaying = true
+        // A paused video stays paused across the switch; the manager only set
+        // the rate if it was playing when the switch began.
+        isPlaying = qualityManager.resumeAfterSwitch
         loadAudioTracks(from: item)
     }
 

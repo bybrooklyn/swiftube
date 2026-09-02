@@ -48,6 +48,8 @@ final class AudioTrackManager {
     // MARK: - Interface
 
     func reset() {
+        loadTask?.cancel()
+        loadTask = nil
         availableAudioTracks = []
         selectedAudioTrack = nil
         audioSelectionGroup = nil
@@ -96,8 +98,17 @@ final class AudioTrackManager {
 
     /// Loads alternate audio renditions from the HLS manifest of `item` and auto-applies
     /// the user's saved language preference.
+    /// The in-flight rendition load, so a new video can cancel the old one.
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+
     func loadAudioTracks(from item: AVPlayerItem) {
-        Task { [weak self] in
+        // `loadMediaSelectionGroup` can take seconds on a cold manifest, and this
+        // used to be an untracked, uncancellable task with no identity check — so
+        // switching videos while one was in flight populated the *new* video's
+        // audio picker from the *old* video's manifest, and then applied a
+        // selection to it. `reset()` ran first and was simply overwritten.
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in
             guard let self else { return }
             let asset = item.asset
             // Fix #126: HLS variant playlists (loaded when quality changes) expose only
@@ -105,6 +116,10 @@ final class AudioTrackManager {
             // leaving no audio option selected → silent video after a quality switch.
             // Use `!isEmpty` so a single-track manifest still gets its track applied.
             let group = try? await asset.loadMediaSelectionGroup(for: .audible)
+            guard !Task.isCancelled else {
+                playerLog.notice("AudioTrackManager: rendition load superseded — discarding")
+                return
+            }
             let groupDesc = group.map { "\($0.options.count) option(s)" } ?? "nil"
             playerLog.notice("AudioTrackManager: loadMediaSelectionGroup=\(groupDesc)")
             guard let group, !group.options.isEmpty else { return }
@@ -133,10 +148,14 @@ final class AudioTrackManager {
             } ?? true  // nil defaultOption is fine (phase-2 simply marks none as original)
             playerLog.notice("AudioTrackManager: \(group.options.count) option(s), phase1Discriminates=\(phase1Discriminates) (mainContent=\(mainContentOptions.count)) defaultOption=\(defaultLocale) defaultInOptions=\(defaultFoundInOptions)")
 
-            for (_, option) in group.options.enumerated() {
+            for (index, option) in group.options.enumerated() {
                 let locale = option.locale?.identifier
                     ?? option.extendedLanguageTag
                     ?? "unknown"
+                // Keyed by locale alone, two renditions with the same language
+                // tag (a dub and a descriptive track, say) collided in
+                // `optionMap` and the later one was selected for both entries.
+                let id = "\(locale)#\(index)"
                 let displayName = option.locale.flatMap { loc -> String? in
                     let name = Locale.current.localizedString(forLanguageCode: loc.identifier)
                     if let name, !name.isEmpty { return name }
@@ -157,10 +176,10 @@ final class AudioTrackManager {
                 // Phase 2: fall back to HLS DEFAULT=YES identity check.
                 let isOriginal: Bool = phase1Discriminates ? isMainContent : isDefault
                 playerLog.notice("  AudioOption: locale=\(locale) isMainContent=\(isMainContent) isAuxiliary=\(isAuxiliary) isDefault=\(isDefault) isOriginal=\(isOriginal) displayName=\(displayName)")
-                let track = AudioTrack(id: locale, name: displayName,
+                let track = AudioTrack(id: id, name: displayName,
                                        languageCode: locale, isOriginal: isOriginal)
                 tracks.append(track)
-                optionMap[locale] = option
+                optionMap[id] = option
             }
             var originalCount = tracks.filter(\.isOriginal).count
             playerLog.notice("AudioTrackManager: \(originalCount)/\(tracks.count) track(s) marked isOriginal=true after phase1/2")
