@@ -16,6 +16,11 @@ public enum RailItem: Hashable, Sendable {
     case channel(String)
     case subscriptions
     case library
+    /// Trending plus every category, as rows on one surface.
+    case explore
+    /// A playlist's contents, opened from a playlist tile. Carries the title
+    /// because the playlist browse response does not return one.
+    case playlist(id: String, title: String)
     case news
     case live
     case podcasts
@@ -43,6 +48,8 @@ public enum RailItem: Hashable, Sendable {
         // valid, the same way `FEnews` is not (see fetchNews). It is served by a
         // search instead, handled in AppModel.open.
         case .podcasts:      nil
+        // Assembled from several fetches in AppModel, not one browse section.
+        case .explore, .playlist: nil
         case .account, .search, .settings, .channel: nil
         }
     }
@@ -51,7 +58,7 @@ public enum RailItem: Hashable, Sendable {
     /// signed-out default.
     public static let fixed: [RailItem] = [
         .account, .search, .home, .shorts, .subscriptions, .library,
-        .music, .gaming, .live, .news, .podcasts, .sports, .settings,
+        .explore, .music, .gaming, .live, .news, .podcasts, .sports, .settings,
     ]
 }
 

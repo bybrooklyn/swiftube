@@ -38,6 +38,16 @@ struct ChannelHeader: View {
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 }
+
+                // The About tab, as the two lines it is worth on a TV.
+                if let about = channel.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !about.isEmpty {
+                    Text(about)
+                        .font(.system(size: Theme.Metrics.cardMetaSize(viewport) * 0.95))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(2)
+                        .frame(maxWidth: rem(40), alignment: .leading)
+                }
             }
 
             subscribeButton

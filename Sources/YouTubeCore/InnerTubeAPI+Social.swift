@@ -38,11 +38,7 @@ extension InnerTubeAPI {
     /// mirroring the Android SmartTube `PlaylistPresenter` → `ACTION_ADD_VIDEO` flow.
     /// Requires authentication.
     public func addToWatchLater(videoId: String) async throws {
-        var body = makeBody(client: tvClientContext)
-        body["playlistId"] = "WL"
-        body["actions"] = [["addedVideoId": videoId, "action": "ACTION_ADD_VIDEO"]]
-        _ = try await postTV(endpoint: "browse/edit_playlist", body: body)
-        tubeLog.notice("addToWatchLater videoId=\(videoId, privacy: .public)")
+        try await addToPlaylist(videoId: videoId, playlistId: "WL")
     }
 
     /// Removes a video from the authenticated user's Watch Later playlist (id \"WL\").
@@ -191,6 +187,48 @@ extension InnerTubeAPI {
         let comments = parseComments(from: commentsData)
         tubeLog.notice("fetchComments videoId=\(videoId, privacy: .public) → \(comments.count, privacy: .public) comments")
         return comments
+    }
+
+    /// Posts a top-level comment. Not upstream.
+    ///
+    /// A signed-in WEB comments continuation carries the comment box, whose
+    /// submit button holds `createCommentParams`; `comment/create_comment`
+    /// takes that back with the text. Signed out there is no box, so this
+    /// throws `.notAuthenticated` before making a request.
+    public func postComment(videoId: String, text: String) async throws {
+        guard authToken != nil else { throw APIError.notAuthenticated }
+        var body = makeBody(client: webClientContext)
+        body["videoId"] = videoId
+        let nextData = try await post(endpoint: "next", body: body, useAuth: true)
+        guard let token = parseCommentsContinuationToken(from: nextData) else {
+            throw APIError.unavailable("comments are off for this video")
+        }
+        let commentsBody = makeBody(client: webClientContext, continuationToken: token)
+        let commentsData = try await post(endpoint: "next", body: commentsBody, useAuth: true)
+        guard let params = firstString(forKey: "createCommentParams", in: commentsData) else {
+            throw APIError.unavailable("no comment box in the response")
+        }
+        var create = makeBody(client: webClientContext)
+        create["createCommentParams"] = params
+        create["commentText"] = text
+        _ = try await post(endpoint: "comment/create_comment", body: create, useAuth: true)
+        tubeLog.notice("postComment videoId=\(videoId, privacy: .public) chars=\(text.count, privacy: .public)")
+    }
+
+    /// Depth-first search for the first string stored under `key`.
+    private func firstString(forKey key: String, in json: Any, depth: Int = 0) -> String? {
+        guard depth < 60 else { return nil }
+        if let dict = json as? [String: Any] {
+            if let value = dict[key] as? String { return value }
+            for value in dict.values {
+                if let found = firstString(forKey: key, in: value, depth: depth + 1) { return found }
+            }
+        } else if let array = json as? [Any] {
+            for item in array {
+                if let found = firstString(forKey: key, in: item, depth: depth + 1) { return found }
+            }
+        }
+        return nil
     }
 
     // MARK: - Private social parsers

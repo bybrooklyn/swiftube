@@ -56,6 +56,39 @@ extension InnerTubeAPI {
         return try parseVideoGroup(from: data, title: nil)
     }
 
+    // MARK: - Other channel tabs (macOS channel page; not upstream)
+    //
+    // Same request as `fetchChannelVideos` with the tab's WEB `params`. The
+    // values are the ones the web client sends for each tab.
+
+    public func fetchChannelShorts(channelId: String) async throws -> VideoGroup {
+        try await fetchChannelTab(channelId: channelId, params: "EgZzaG9ydHPyBgUKA5oBAA==", title: "Shorts")
+    }
+
+    /// Community posts. Only posts with an attached video come back as tiles —
+    /// `parseVideoGroup` finds the attachment's `videoRenderer`; a text-only
+    /// post has nothing a shelf can show.
+    // ponytail: text-only posts are dropped; add a post renderer when a text surface exists.
+    public func fetchChannelCommunity(channelId: String) async throws -> VideoGroup {
+        try await fetchChannelTab(channelId: channelId, params: "Egljb21tdW5pdHnyBgQKAkoA", title: "Community")
+    }
+
+    public func fetchChannelPlaylists(channelId: String) async throws -> [PlaylistInfo] {
+        var body = makeBody(client: webClientContext)
+        body["browseId"] = channelId
+        body["params"] = "EglwbGF5bGlzdHPyBgQKAkIA"
+        let data = try await post(endpoint: "browse", body: body)
+        return try parsePlaylists(from: data)
+    }
+
+    private func fetchChannelTab(channelId: String, params: String, title: String) async throws -> VideoGroup {
+        var body = makeBody(client: webClientContext)
+        body["browseId"] = channelId
+        body["params"] = params
+        let data = try await post(endpoint: "browse", body: body)
+        return try parseVideoGroup(from: data, title: title)
+    }
+
     // MARK: - Private channel helpers
 
     /// Resolves a YouTube `@handle` to the canonical `UC…` channel ID using the

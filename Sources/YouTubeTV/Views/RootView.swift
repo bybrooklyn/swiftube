@@ -63,6 +63,10 @@ struct RootView: View {
                 // Hosted outside the conditional so the dialog's glass
                 // materialises in and out rather than cutting (see GlassHost).
                 GlassHost {
+                    if let cardMenu = model.cardMenu {
+                        CardMenuView(model: cardMenu, onBack: { model.closeCardMenu() })
+                            .transition(.opacity)
+                    }
                     if model.isConfirmingSignOut {
                         ConfirmDialog(
                             title: "Sign out of YouTube?",

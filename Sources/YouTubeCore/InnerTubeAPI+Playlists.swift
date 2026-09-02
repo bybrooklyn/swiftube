@@ -49,9 +49,21 @@ extension InnerTubeAPI {
         return try parseVideoGroup(from: data, title: nil)
     }
 
-    // MARK: - Private playlist parser
+    /// Adds a video to any of the user's playlists. `addToWatchLater` is this
+    /// with the fixed id "WL". Requires authentication. Not upstream.
+    public func addToPlaylist(videoId: String, playlistId: String) async throws {
+        var body = makeBody(client: tvClientContext)
+        body["playlistId"] = playlistId
+        body["actions"] = [["addedVideoId": videoId, "action": "ACTION_ADD_VIDEO"]]
+        _ = try await postTV(endpoint: "browse/edit_playlist", body: body)
+        tubeLog.notice("addToPlaylist \(playlistId, privacy: .public) videoId=\(videoId, privacy: .public)")
+    }
 
-    private func parsePlaylists(from json: [String: Any]) throws -> [PlaylistInfo] {
+    // MARK: - Playlist parser
+
+    // Internal rather than private: the channel Playlists tab (+Channel.swift)
+    // parses the same renderers.
+    func parsePlaylists(from json: [String: Any]) throws -> [PlaylistInfo] {
         var playlists: [PlaylistInfo] = []
 
         // Extracts a PlaylistInfo from a renderer dict, handling both

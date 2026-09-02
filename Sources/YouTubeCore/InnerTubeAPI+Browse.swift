@@ -397,4 +397,20 @@ extension InnerTubeAPI {
         }
         return try await search(query: "sports")
     }
+
+    /// Trending, for the macOS Explore surface. `FEtrending` is a real
+    /// TVHTML5 browse id; the search fallback mirrors the other categories.
+    /// Not upstream.
+    public func fetchTrending() async throws -> VideoGroup {
+        do {
+            var body = makeBody(client: tvClientContext)
+            body["browseId"] = "FEtrending"
+            let data = try await postTVCategory(endpoint: "browse", body: body)
+            let group = try parseVideoGroup(from: data, title: "Trending")
+            if !group.videos.isEmpty { return group }
+        } catch {
+            tubeLog.notice("fetchTrending browse failed, falling back to search: \(error, privacy: .public)")
+        }
+        return try await search(query: "trending")
+    }
 }

@@ -249,7 +249,7 @@ struct TVPlayerView: View {
     /// glass to two small shapes rather than ten.
     private var rightActions: some View {
         HStack(spacing: Theme.Metrics.transportGap(viewport)) {
-            pill([.like, .dislike, .comments, .save])
+            pill([.like, .dislike, .comments, .save, .addToPlaylist])
             pill([.stats, .settings])
         }
     }

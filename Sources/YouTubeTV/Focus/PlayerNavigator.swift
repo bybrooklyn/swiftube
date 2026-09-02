@@ -21,6 +21,8 @@ public enum PlayerControl: String, CaseIterable, Equatable, Hashable, Sendable {
     case dislike
     case comments
     case save
+    /// Save to a playlist other than Watch Later — opens the picker.
+    case addToPlaylist
     case stats
     case settings
 
@@ -36,6 +38,7 @@ public enum PlayerControl: String, CaseIterable, Equatable, Hashable, Sendable {
         case .dislike:     likeStatus == .dislike ? "hand.thumbsdown.fill" : "hand.thumbsdown"
         case .comments:    "text.bubble"
         case .save:        isSaved ? "bookmark.fill" : "bookmark"
+        case .addToPlaylist: "text.badge.plus"
         case .stats:       "eye"
         case .settings:    "gearshape"
         }

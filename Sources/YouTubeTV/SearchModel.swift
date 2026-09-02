@@ -25,6 +25,8 @@ final class SearchModel {
         case space
         case backspace
         case clear
+        /// Only on the comment composer's keyboard; search has no submit.
+        case submit
 
         var label: String {
             switch self {
@@ -32,6 +34,7 @@ final class SearchModel {
             case .space:            "space"
             case .backspace:        "delete"
             case .clear:            "clear"
+            case .submit:           "post"
             }
         }
 
@@ -97,6 +100,12 @@ final class SearchModel {
 
     /// Pure grid movement over the key list, so it can be tested without a view.
     nonisolated static func nextKey(from index: Int, direction: MoveDirection) -> Int? {
+        nextKey(from: index, direction: direction, keys: keys)
+    }
+
+    /// The same rules over any key list — the comment composer's keyboard
+    /// has the same grid with a different last row.
+    nonisolated static func nextKey(from index: Int, direction: MoveDirection, keys: [Key]) -> Int? {
         let wideStart = keys.firstIndex { $0.isWide } ?? keys.count
         let isWide = index >= wideStart
 
@@ -147,6 +156,7 @@ final class SearchModel {
         case .space:            query += " "
         case .backspace:        if !query.isEmpty { query.removeLast() }
         case .clear:            query = ""
+        case .submit:           break   // not on the search keyboard
         }
         scheduleSearch()
     }
