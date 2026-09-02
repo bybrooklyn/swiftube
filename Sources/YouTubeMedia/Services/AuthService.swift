@@ -79,6 +79,14 @@ public final class AuthService {
     var scope = "openid http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content https://www.googleapis.com/auth/youtube"
     private var tokenRefreshTask: Task<Void, Never>?
 
+    /// Bumped whenever the auth session is torn down or replaced (signOut,
+    /// clearSession, a new beginSignIn). An in-flight refresh/exchange captures
+    /// the epoch before its network await and re-checks it after resuming;
+    /// on mismatch the response is discarded instead of applied and persisted —
+    /// persisting it after signOut resurrected cleared credentials (the save
+    /// Task landed on TokenManager after the clear Task).
+    var authEpoch = 0
+
     // State persisted across foreground/background transitions so that the
     // poll loop can be restarted without re-requesting a device code.
     private var currentDeviceCode: String?
@@ -137,6 +145,10 @@ public final class AuthService {
         }
         isSigningIn = true
         defer { isSigningIn = false }
+        // Invalidate any in-flight exchange from a previous attempt before its
+        // poll task is cancelled — the cancel does not stop an exchange that is
+        // already suspended at its network await.
+        authEpoch += 1
         pollTask?.cancel()
         error = nil
         pendingActivation = nil
@@ -178,6 +190,7 @@ public final class AuthService {
 
     /// Cancel an in-progress activation.
     public func cancelSignIn() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         pendingActivation = nil
@@ -217,6 +230,7 @@ public final class AuthService {
     }
 
     public func signOut() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         tokenRefreshTask?.cancel()
@@ -236,6 +250,7 @@ public final class AuthService {
     /// Used by `--uitesting-sign-out` so UI tests can verify signed-out UI on a
     /// simulator that has real credentials stored in the keychain.
     public func clearSession() {
+        authEpoch += 1
         pollTask?.cancel()
         pollTask = nil
         tokenRefreshTask?.cancel()

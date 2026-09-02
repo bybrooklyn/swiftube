@@ -38,6 +38,12 @@ protocol QualityEventHandler: AnyObject {
     /// Called when a quality-switch `AVPlayerItem` becomes `.readyToPlay`.
     /// The coordinator must seek to `seekTo` (if > 0), mark `isPlaying`, and load audio tracks.
     func qualityItemDidBecomeReady(_ item: AVPlayerItem, seekTo: TimeInterval)
+
+    /// Called immediately after a quality-switch item is swapped into the player, so the
+    /// coordinator can move the end-of-item and stall observers onto the new item.
+    /// Without this a quality change part-way through a video silently disables autoplay:
+    /// the observers stay bound to the item that was just discarded.
+    func installEndAndStallObservers(for item: AVPlayerItem, endsQualityTransition: Bool)
     /// Called when a quality-switch `AVPlayerItem` enters `.failed` with the full error context.
     /// The coordinator uses `qualityRecoveryAction(for:quality:hasAppliedH264Cap:)` to
     /// dispatch the appropriate recovery path.
@@ -284,6 +290,7 @@ final class PlaybackQualityManager {
                 case .failed:
                     let err = item.error.map { "\($0)" } ?? "nil"
                     playerLog.error("❌ Quality-switch AVPlayerItem failed: \(err)")
+                    self.delegate?.isQualityChangePending = false
                     await self.delegate?.qualityItemDidFail(
                         error: item.error,
                         quality: quality,
@@ -299,6 +306,7 @@ final class PlaybackQualityManager {
         delegate?.isQualityChangePending = true
         delegate?.isSwappingItem = true
         player.replaceCurrentItem(with: item)
+        delegate?.installEndAndStallObservers(for: item, endsQualityTransition: false)
         delegate?.isSwappingItem = false
     }
 
@@ -606,6 +614,7 @@ final class PlaybackQualityManager {
         }
         delegate?.isSwappingItem = true
         player.replaceCurrentItem(with: item)
+        delegate?.installEndAndStallObservers(for: item, endsQualityTransition: false)
         delegate?.isSwappingItem = false
     }
 
@@ -665,6 +674,7 @@ final class PlaybackQualityManager {
                 case .failed:
                     let err = item.error.map { "\($0)" } ?? "nil"
                     playerLog.error("❌ [wkHLS quality] AVPlayerItem failed: \(err)")
+                    self.delegate?.isQualityChangePending = false
                     await MainActor.run { self.delegate?.toastMessage = "Quality unavailable" }
                 case .unknown: break
                 @unknown default: break
@@ -674,6 +684,7 @@ final class PlaybackQualityManager {
         delegate?.isQualityChangePending = true
         delegate?.isSwappingItem = true
         player.replaceCurrentItem(with: item)
+        delegate?.installEndAndStallObservers(for: item, endsQualityTransition: false)
         delegate?.isSwappingItem = false
     }
     #endif

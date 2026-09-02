@@ -18,6 +18,9 @@ final class KeyboardReader {
     private var handler: (NavigationIntent) -> Void = { _ in }
 
     func start(_ handler: @escaping (NavigationIntent) -> Void) {
+        // Idempotent: assigning over a live monitor leaks it, and both copies
+        // keep firing — every key press producing two intents.
+        stop()
         self.handler = handler
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }

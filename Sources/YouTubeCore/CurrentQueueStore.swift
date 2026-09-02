@@ -77,9 +77,16 @@ public actor CurrentQueueStore: UserDefaultsBackedStore {
     }
 
     /// Empties the queue and removes the UserDefaults entry.
+    ///
+    /// The key is removed rather than rewritten as an empty array — a cleared
+    /// queue should leave nothing behind locally. But the clear still has to
+    /// reach `afterPersist()`, which is what pushes to iCloud: this was the one
+    /// mutator that skipped it, so the cloud copy kept the old queue and the next
+    /// external change restored it.
     public func clear() {
         videos = []
         defaults.removeObject(forKey: Self.defaultsKey)
+        afterPersist()
     }
 
     /// Atomically replaces the queue with `newVideos`, preserving playlist order

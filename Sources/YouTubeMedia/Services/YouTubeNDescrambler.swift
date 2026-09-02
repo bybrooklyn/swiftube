@@ -1,4 +1,5 @@
 import Darwin
+import YouTubeCore
 import Foundation
 import os.log
 
@@ -16,7 +17,7 @@ import os.log
 actor YouTubeNDescrambler {
     static let shared = YouTubeNDescrambler()
 
-    private let log = Logger(subsystem: "com.void.smarttube.app", category: "NDescramble")
+    private let log = Logger(subsystem: appSubsystem, category: "NDescramble")
 
     /// player.js temp file path once downloaded.
     private var cachedPlayerJSPath: String?
@@ -291,7 +292,7 @@ actor YouTubeNDescrambler {
     // non-embeddable videos; with VISITOR_INFO1_LIVE seeded, YouTube generates the URL
     // with spc= (self-authenticated CDN token) so per-quality segments succeed at the CDN.
     private static func fetchHLSPlaylistURLViaCookieSeeding(videoId: String) async -> URL? {
-        let log = Logger(subsystem: "com.void.smarttube.app", category: "NDescramble")
+        let log = Logger(subsystem: appSubsystem, category: "NDescramble")
 
         // Step 1: GET watch page with Safari UA to seed youtube.com cookies.
         guard let watchURL = URL(string: "https://www.youtube.com/watch?v=\(videoId)") else { return nil }

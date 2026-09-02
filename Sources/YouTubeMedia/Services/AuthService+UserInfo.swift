@@ -35,9 +35,9 @@ extension AuthService {
         let (data, response) = try await URLSession.shared.data(for: req)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         authLog.notice("fetchUserInfo() — HTTP \(statusCode)")
-        if let bodyStr = String(data: data, encoding: .utf8) {
-            authLog.notice("fetchUserInfo() — response: \(String(bodyStr.prefix(600)))")
-        }
+        // The first 600 bytes of accounts_list is the account name, the avatar URL
+        // and the channel id — it was being logged unredacted on every sign-in.
+        authLog.notice("fetchUserInfo() — response \(data.count) bytes")
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             authLog.error("fetchUserInfo() — JSON parse failed")
             return
@@ -51,7 +51,7 @@ extension AuthService {
             accountName = (nameDict["runs"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined()
                 ?? nameDict["simpleText"] as? String
         }
-        authLog.notice("fetchUserInfo() — accountName=\(self.accountName ?? "nil")")
+        authLog.noticeSensitive("fetchUserInfo() — accountName=\(self.accountName ?? "nil")")
         if let photoDict = item["accountPhoto"] as? [String: Any],
            let thumbnails = photoDict["thumbnails"] as? [[String: Any]],
            let last = thumbnails.last,

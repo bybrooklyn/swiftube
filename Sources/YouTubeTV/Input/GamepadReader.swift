@@ -15,8 +15,19 @@ final class GamepadReader {
     private var handler: (NavigationIntent) -> Void = { _ in }
     private var observers: [NSObjectProtocol] = []
     private var repeatTask: Task<Void, Never>?
-    /// The direction currently held, so we know when to start and stop repeating.
+    /// The direction currently driving auto-repeat. **Derived** from the two
+    /// source latches below — never written from a handler directly.
+    ///
+    /// It used to be written by both sources, which made them cancel each other:
+    /// releasing the d-pad emits (0, 0), so `heldDirection` went nil and the
+    /// repeat stopped — while `stickDirection` stayed latched, so no further
+    /// stick event fired until the stick re-centred. A held stick simply stopped
+    /// repeating, permanently. The reverse held too, and each source biased the
+    /// other's hysteresis threshold.
     private var heldDirection: MoveDirection?
+
+    /// Latched d-pad direction.
+    private var dpadDirection: MoveDirection?
     /// Latched stick direction — an analog stick sends a continuous stream of
     /// values, so without this every frame past the threshold would be a move.
     private var stickDirection: MoveDirection?
@@ -28,6 +39,10 @@ final class GamepadReader {
     private let stickRelease: Float = 0.40
 
     func start(_ handler: @escaping (NavigationIntent) -> Void) {
+        // Idempotent: `AppModel.start()` runs from a `.task`, which SwiftUI can
+        // run again. A second start used to append a second pair of notification
+        // observers, doubling every intent.
+        stop()
         self.handler = handler
 
         for controller in GCController.controllers() {
@@ -43,14 +58,39 @@ final class GamepadReader {
             }
         })
         observers.append(center.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { self.stopRepeating() }
+            // Clear the latches too. A pad that disconnects mid-press left them
+            // set, so the first press in that same direction after reconnecting
+            // matched the stale latch and was swallowed.
+            MainActor.assumeIsolated { self.releaseAllDirections() }
         })
     }
 
     func stop() {
-        stopRepeating()
+        releaseAllDirections()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
+        // GCController instances outlive this reader, so leaving our closures on
+        // them keeps `self` alive and lets a stopped reader still emit.
+        for controller in GCController.controllers() {
+            guard let pad = controller.extendedGamepad else { continue }
+            pad.dpad.valueChangedHandler = nil
+            pad.leftThumbstick.valueChangedHandler = nil
+            pad.buttonA.pressedChangedHandler = nil
+            pad.buttonB.pressedChangedHandler = nil
+            pad.buttonX.pressedChangedHandler = nil
+            pad.buttonY.pressedChangedHandler = nil
+            pad.buttonMenu.pressedChangedHandler = nil
+            pad.leftShoulder.pressedChangedHandler = nil
+            pad.rightShoulder.pressedChangedHandler = nil
+        }
+    }
+
+    /// Drops both source latches and the derived one, and stops any repeat.
+    private func releaseAllDirections() {
+        stopRepeating()
+        dpadDirection = nil
+        stickDirection = nil
+        heldDirection = nil
     }
 
     private func attach(_ controller: GCController) {
@@ -99,23 +139,31 @@ final class GamepadReader {
     }
 
     private func handleDirectional(x: Float, y: Float, isStick: Bool) {
+        // Hysteresis is per source: each latch is compared against its own
+        // previous value, so one source's state cannot shift the other's
+        // press/release threshold.
         let direction = Self.direction(x: x, y: y,
                                        press: isStick ? stickThreshold : 0.5,
                                        release: isStick ? stickRelease : 0.5,
-                                       current: isStick ? stickDirection : heldDirection)
-        if isStick { stickDirection = direction }
+                                       current: isStick ? stickDirection : dpadDirection)
+        if isStick { stickDirection = direction } else { dpadDirection = direction }
 
-        guard direction != heldDirection else { return }
-        heldDirection = direction
+        // The source that just changed wins while it is deflected; when it
+        // releases, the other source takes over if it is still held. That is what
+        // lets you release the d-pad without killing a held stick.
+        let effective = direction ?? (isStick ? dpadDirection : stickDirection)
+
+        guard effective != heldDirection else { return }
+        heldDirection = effective
         stopRepeating()
-        guard let direction else { return }
+        guard let effective else { return }
 
-        emit(.move(direction))
+        emit(.move(effective))
         repeatTask = Task { [weak self] in
             try? await Task.sleep(for: RepeatCadence.initialDelay)
             while !Task.isCancelled {
-                guard let self, self.heldDirection == direction else { return }
-                self.emit(.move(direction))
+                guard let self, self.heldDirection == effective else { return }
+                self.emit(.move(effective))
                 try? await Task.sleep(for: RepeatCadence.interval)
             }
         }
@@ -124,10 +172,17 @@ final class GamepadReader {
     /// Resolves an axis pair to at most one direction. The dominant axis wins so
     /// a diagonal push never fires two moves at once, which on a grid reads as
     /// focus jumping unpredictably.
-    static func direction(x: Float, y: Float, press: Float, release: Float,
-                          current: MoveDirection?) -> MoveDirection? {
+    /// `nonisolated` because it genuinely is: a pure function of its arguments,
+    /// touching no reader state. That also lets it be tested without hopping to
+    /// the main actor.
+    nonisolated static func direction(x: Float, y: Float, press: Float, release: Float,
+                                      current: MoveDirection?) -> MoveDirection? {
         let threshold = current == nil ? press : release
-        if abs(x) < threshold && abs(y) < threshold { return nil }
+        // Radial, not per-axis. Testing each axis separately left the corners
+        // dead: a clean 45° push at (0.65, 0.65) has a magnitude of 0.92 but
+        // neither axis reaches a 0.65 press threshold, so nothing happened until
+        // one axis alone crossed it. On a grid UI that reads as a stiff stick.
+        if (x * x + y * y).squareRoot() < threshold { return nil }
         if abs(x) >= abs(y) {
             return x > 0 ? .right : .left
         } else {

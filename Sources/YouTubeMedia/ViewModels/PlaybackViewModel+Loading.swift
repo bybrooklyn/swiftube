@@ -70,27 +70,7 @@ extension PlaybackViewModel {
             error = nil
             wasPlayingBeforeSuspend = false
             // Re-wire end-of-playback and stall observers on the still-alive item.
-            endObserverTask?.cancel()
-            endObserverTask = Task { [weak self, parkedItem] in
-                let notifications = NotificationCenter.default.notifications(
-                    named: AVPlayerItem.didPlayToEndTimeNotification, object: parkedItem
-                )
-                for await _ in notifications {
-                    guard let self, !Task.isCancelled else { return }
-                    self.handlePlaybackEnd()
-                }
-            }
-            stallObserverTask?.cancel()
-            stallObserverTask = Task { @MainActor [weak self, parkedItem] in
-                let notifications = NotificationCenter.default.notifications(
-                    named: AVPlayerItem.playbackStalledNotification, object: parkedItem
-                )
-                for await _ in notifications {
-                    guard let self, !Task.isCancelled else { return }
-                    self.stallCount += 1
-                    playerLog.notice("[fix12/stall] playbackStalled at t=\(Int(self.currentTime))s #\(self.stallCount)")
-                }
-            }
+            installEndAndStallObservers(for: parkedItem)
             #if os(iOS)
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
@@ -385,11 +365,12 @@ extension PlaybackViewModel {
         let capturedAPI = api
         let capturedVideoId = video.id
         if !(await api.hasPoToken(for: video.id)) {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await capturedAPI.prefetchPoToken(for: capturedVideoId) }
-                group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
-                _ = await group.next()
-                group.cancelAll()
+            // A real 2 s budget. The task-group form this replaced awaited the
+            // PO-token mint regardless of the sleep, so a cold BotGuard pipeline
+            // blocked the first frame behind it. The mint keeps running after we
+            // stop waiting — the next attempt still gets a warm token.
+            await withTimeout(seconds: 2) {
+                await capturedAPI.prefetchPoToken(for: capturedVideoId)
             }
         }
         #if canImport(WebKit)
@@ -462,66 +443,7 @@ extension PlaybackViewModel {
                     }
                 }
                 player.replaceCurrentItem(with: item)
-                endObserverTask?.cancel()
-                endObserverTask = Task { [weak self] in
-                    let notifications = NotificationCenter.default.notifications(
-                        named: AVPlayerItem.didPlayToEndTimeNotification,
-                        object: item
-                    )
-                    for await _ in notifications {
-                        guard let self, !Task.isCancelled else { return }
-                        self.handlePlaybackEnd()
-                    }
-                }
-                stallObserverTask?.cancel()
-                stallObserverTask = Task { @MainActor [weak self] in
-                    let notifications = NotificationCenter.default.notifications(
-                        named: AVPlayerItem.playbackStalledNotification,
-                        object: item
-                    )
-                    for await _ in notifications {
-                        guard let self, !Task.isCancelled else { return }
-                        self.stallCount += 1
-                        let t = Int(self.currentTime)
-                        playerLog.notice("[stall] AVPlayerItemPlaybackStalled at t=\(t)s stall#\(self.stallCount) video=\(self.currentVideo?.id ?? "unknown")")
-                        let stallError = NSError(
-                            domain: "SmartTube.PlaybackStall",
-                            code: 0,
-                            userInfo: [NSLocalizedDescriptionKey: "AVPlayerItemPlaybackStalled at t=\(t)s (stall #\(self.stallCount))"]
-                        )
-                        playerLog.recordNonFatal(stallError, userInfo: [
-                            "video_id":       self.currentVideo?.id ?? "unknown",
-                            "stall_at_time":  String(t),
-                            "stall_count":    String(self.stallCount),
-                            "video_duration": String(Int(self.duration)),
-                            "stall_trigger":  "AVPlayerItemPlaybackStalled"
-                        ])
-                        // Stall recovery (#193): wait 2 s for AVPlayer to self-heal;
-                        // if still stalled, nudge the pipeline with a near-zero seek
-                        // + explicit rate restore. Capped at 3 attempts per item.
-                        let recoveryCount = self.stallCount
-                        if recoveryCount <= 3 {
-                            Task { @MainActor [weak self] in
-                                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                                guard let self, self.isPlaying, self.player.rate == 0,
-                                      !self.isQualityChangePending else { return }
-                                let seekT = self.currentTime
-                                playerLog.notice("[stall] recovery#\(recoveryCount): seeking to \(seekT)s to flush pipeline")
-                                self.player.seek(
-                                    to: CMTime(seconds: seekT, preferredTimescale: 600),
-                                    toleranceBefore: .zero,
-                                    toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600)
-                                ) { [weak self] _ in
-                                    Task { @MainActor [weak self] in
-                                        guard let self, self.isPlaying else { return }
-                                        self.player.rate = Float(self.settings.playbackSpeed)
-                                        playerLog.notice("[stall] recovery#\(recoveryCount): rate restored")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                installEndAndStallObservers(for: item)
                 setupRemoteCommandCenter()
                 #if os(iOS)
                 do {
@@ -651,6 +573,17 @@ extension PlaybackViewModel {
                 return
             }
             playerInfo = info
+            // Enrich the card-shaped Video the caller handed us with what /player
+            // knows. Feed items parsed from the TV client carry no description and
+            // often no view count, so the player's Description panel had nothing to
+            // show even though the data had just arrived.
+            if var enriched = currentVideo {
+                if enriched.description?.isEmpty ?? true { enriched.description = info.video.description }
+                if enriched.viewCount == nil { enriched.viewCount = info.video.viewCount }
+                if enriched.channelId?.isEmpty ?? true { enriched.channelId = info.video.channelId }
+                if enriched.channelTitle.isEmpty { enriched.channelTitle = info.video.channelTitle }
+                currentVideo = enriched
+            }
             availableFormats = Self.deduplicatedVideoFormats(info.formats)
             playerLog.notice("[loadAsync] availableFormats after initial dedup: raw=\(info.formats.count) deduped=\(availableFormats.count) maxH=\(availableFormats.map(\.height).max() ?? 0)")
             availableCaptions = info.captionTracks
@@ -922,68 +855,7 @@ extension PlaybackViewModel {
             }
 
             // Observe end-of-item using NotificationCenter async sequence
-            endObserverTask?.cancel()
-            endObserverTask = Task { [weak self] in
-                let notifications = NotificationCenter.default.notifications(
-                    named: AVPlayerItem.didPlayToEndTimeNotification,
-                    object: item
-                )
-                for await _ in notifications {
-                    guard let self, !Task.isCancelled else { return }
-                    self.handlePlaybackEnd()
-                }
-            }
-
-            // Observe playback stalls and record them as Crashlytics non-fatals (bug #193).
-            stallObserverTask?.cancel()
-            stallObserverTask = Task { @MainActor [weak self] in
-                let notifications = NotificationCenter.default.notifications(
-                    named: AVPlayerItem.playbackStalledNotification,
-                    object: item
-                )
-                for await _ in notifications {
-                    guard let self, !Task.isCancelled else { return }
-                    self.stallCount += 1
-                    let t = Int(self.currentTime)
-                    playerLog.notice("[stall] AVPlayerItemPlaybackStalled at t=\(t)s stall#\(self.stallCount) video=\(self.currentVideo?.id ?? "unknown")")
-                    let stallError = NSError(
-                        domain: "SmartTube.PlaybackStall",
-                        code: 0,
-                        userInfo: [NSLocalizedDescriptionKey: "AVPlayerItemPlaybackStalled at t=\(t)s (stall #\(self.stallCount))"]
-                    )
-                    playerLog.recordNonFatal(stallError, userInfo: [
-                        "video_id":       self.currentVideo?.id ?? "unknown",
-                        "stall_at_time":  String(t),
-                        "stall_count":    String(self.stallCount),
-                        "video_duration": String(Int(self.duration)),
-                        "stall_trigger":  "AVPlayerItemPlaybackStalled"
-                    ])
-                    // Stall recovery (#193): wait 2 s for AVPlayer to self-heal;
-                    // if still stalled, nudge the pipeline with a near-zero seek
-                    // + explicit rate restore. Capped at 3 attempts per item.
-                    let recoveryCount = self.stallCount
-                    if recoveryCount <= 3 {
-                        Task { @MainActor [weak self] in
-                            try? await Task.sleep(nanoseconds: 2_000_000_000)
-                            guard let self, self.isPlaying, self.player.rate == 0,
-                                  !self.isQualityChangePending else { return }
-                            let seekT = self.currentTime
-                            playerLog.notice("[stall] recovery#\(recoveryCount): seeking to \(seekT)s to flush pipeline")
-                            self.player.seek(
-                                to: CMTime(seconds: seekT, preferredTimescale: 600),
-                                toleranceBefore: .zero,
-                                toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600)
-                            ) { [weak self] _ in
-                                Task { @MainActor [weak self] in
-                                    guard let self, self.isPlaying else { return }
-                                    self.player.rate = Float(self.settings.playbackSpeed)
-                                    playerLog.notice("[stall] recovery#\(recoveryCount): rate restored")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            installEndAndStallObservers(for: item)
 
             // Audio-only mode: if enabled, replace the HLS item with an audio-only asset.
             // Falls back to HLS (already in player) on any failure. No-op when disabled.

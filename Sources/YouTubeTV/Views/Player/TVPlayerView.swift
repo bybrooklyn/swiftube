@@ -32,8 +32,28 @@ struct TVPlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
 
+            // Captions sit under the chrome but over the video, and are drawn
+            // whether or not the transport is up — a subtitle that only appears
+            // while the control bar happens to be visible is not a subtitle.
+            CaptionOverlay(playback: model.playback,
+                           controlsVisible: model.areControlsVisible)
+
             if model.areControlsVisible {
                 overlay.transition(.opacity)
+            }
+
+            if model.isStatsVisible {
+                StatsOverlay(playback: model.playback)
+                    .padding(inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
+
+            if model.hasFailed {
+                PlaybackErrorPanel(playback: model.playback)
+                    .transition(.opacity)
+                    .zIndex(3)
             }
 
             if let menu = model.menu {
@@ -50,6 +70,9 @@ struct TVPlayerView: View {
             }
         }
         .animation(Theme.travel, value: model.areControlsVisible)
+        .animation(Theme.stateChange, value: model.isStatsVisible)
+        .animation(Theme.stateChange, value: model.hasFailed)
+        .animation(Theme.stateChange, value: model.isDescriptionOpen)
         .animation(Theme.stateChange, value: model.playback.currentToastSegment)
         .animation(Theme.stateChange, value: model.menu == nil)
     }
@@ -98,6 +121,13 @@ struct TVPlayerView: View {
         .overlay(alignment: .trailing) {
             if model.isCommentsOpen {
                 CommentsPanel(model: model)
+                    .padding(.trailing, inset)
+                    .padding(.vertical, inset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if model.isDescriptionOpen {
+                // Same column as the comments — they are mutually exclusive, and
+                // sharing the position keeps the video's visible area constant.
+                DescriptionPanel(model: model)
                     .padding(.trailing, inset)
                     .padding(.vertical, inset)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -221,10 +251,12 @@ struct TVPlayerView: View {
     }
 
     private func pill(_ controls: [PlayerControl]) -> some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(controls, id: \.self) { pillButton($0) }
-            }
+        // No `GlassEffectContainer`, for the reason GuideRail.swift:47 spells out:
+        // it only earns its cost when its children apply `.glassEffect`, and none
+        // of these do — the pill is a flat `Theme.control` capsule. An empty
+        // container is a render pass for nothing.
+        HStack(spacing: 0) {
+            ForEach(controls, id: \.self) { pillButton($0) }
         }
         .background(Theme.control, in: .capsule)
     }

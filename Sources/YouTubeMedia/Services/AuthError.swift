@@ -12,6 +12,11 @@ public enum AuthError: LocalizedError {
     case authorizationPending
     case slowDown
     case deviceCodeExpired
+    /// An in-flight token exchange/refresh was abandoned because the auth
+    /// session changed underneath it (sign-out, new sign-in attempt). The
+    /// response must not be applied or persisted — persisting it resurrected
+    /// credentials the user had just cleared.
+    case superseded
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +29,7 @@ public enum AuthError: LocalizedError {
         case .authorizationPending:   return "Waiting for authorisation…"
         case .slowDown:               return "Too many requests — slowing down"
         case .deviceCodeExpired:      return "The sign-in code expired. Please try again."
+        case .superseded:             return "Sign-in state changed; the pending token was discarded"
         }
     }
 }

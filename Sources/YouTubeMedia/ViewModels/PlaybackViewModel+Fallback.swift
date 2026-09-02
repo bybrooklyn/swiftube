@@ -102,6 +102,14 @@ extension PlaybackViewModel {
     ///             Correct VR headers (nameID=28, Oculus UA on googleapis.com) are required.
     ///   Phase 4 — if all adaptive attempts fail, fall back to the Android muxed 360p stream.
     ///   The entire cycle repeats up to 3 times to survive transient network errors.
+    /// Wall-clock budget for one `exhaustiveRetry` run, across every rung.
+    ///
+    /// Generous enough that the rungs which actually work on macOS — VisionOS
+    /// HLS first, then the TV client — get their full chance, and short enough
+    /// that a video which is never going to play says so while the user is still
+    /// watching the screen.
+    static let retryLadderBudgetSeconds: Double = 45
+
     func exhaustiveRetry(video: Video, originalError: Error?, playerInfo: PlayerInfo? = nil, cached: CachedVideoData? = nil) async {
         // Testing override: --uitesting-force-stream-method restricts the retry to a
         // single named client so UI tests can probe one path at a time.
@@ -109,6 +117,26 @@ extension PlaybackViewModel {
             await probeStreamMethod(method, video: video)
             return
         }
+        // An overall budget for the whole ladder.
+        //
+        // Every rung has its own timeout but there was no cap across them, and no
+        // backoff between the three attempt passes. Adding the documented
+        // per-rung budgets up gives a worst case around nine minutes of spinner
+        // before the give-up tail — dominated by two 40 s WebView extractions, a
+        // BotGuard wait, and three passes over seven clients. Past the deadline
+        // the remaining rungs are skipped and the user is told, which is a far
+        // better outcome than a spinner nobody will wait out.
+        //
+        // Checked at the rungs that cost real time, not on every line: a rung
+        // already in flight is allowed to finish, since it may be the one that
+        // works.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(Self.retryLadderBudgetSeconds))
+        func ladderExpired(_ phase: String) -> Bool {
+            guard ContinuousClock.now >= deadline else { return false }
+            playerLog.notice("[ladder] budget of \(Self.retryLadderBudgetSeconds)s exhausted before \(phase) — giving up")
+            return true
+        }
+
         // VISIONOS is yt-dlp's primary JS-less Apple client: after seeding a
         // normal YouTube webpage session it returns **token-free HLS** with
         // H.264 through 1080p, which AVPlayer handles natively.
@@ -199,6 +227,7 @@ extension PlaybackViewModel {
         }
 
         #if canImport(WebKit)
+        if ladderExpired("the cached-HLS shortcut") { return giveUp(video: video) }
         // Phase -1a: Cached WKWebView HLS URL shortcut — skip 5–9 s extraction when the
         // master manifest URL for this video was stored by a prior session or neighbour
         // pre-extraction. Falls through to live WKWebView extraction if the URL has expired
@@ -262,6 +291,7 @@ extension PlaybackViewModel {
                 await VideoPreloadCache.shared.invalidateWKHLSURL(for: video.id)
             }
         }
+        if ladderExpired("the BotGuard/WebView race") { return giveUp(video: video) }
         // Phase -2 + Phase -1b: race BotGuardWV adaptive path vs WKWebView HLS path.
         //
         // Both paths start simultaneously. They interleave cooperatively at every `await`
@@ -396,7 +426,9 @@ extension PlaybackViewModel {
             }
         }
         #endif
+        if ladderExpired("the client sweep") { return giveUp(video: video) }
         for attempt in 1...3 {
+            if attempt > 1, ladderExpired("retry pass \(attempt)") { return giveUp(video: video) }
             guard !Task.isCancelled else { return }
             retryAttempts = attempt
             isLoading = true
@@ -639,7 +671,16 @@ extension PlaybackViewModel {
         }
 
         playerLog.error("❌ All 3 retry attempts exhausted for \(video.id)")
+        giveUp(video: video)
+    }
+
+    /// The single place the ladder reports defeat, so an early exit on the budget
+    /// leaves exactly the state the exhausted path does — and `TVPlayerView` has
+    /// one thing to render.
+    private func giveUp(video: Video) {
+        playerLog.error("[ladder] giving up on \(video.id)")
         error = APIError.unavailable("Unable to play this video")
+        retryStatusMessage = "Tried every stream this client can use and none of them played."
         isLoading = false
     }
 
@@ -652,11 +693,12 @@ extension PlaybackViewModel {
     func racePathA(video: Video) async -> Bool {
         if !BotGuardWebViewRunner.shared.isReady {
             playerLog.notice("[BotGuardWV] waiting up to 6 s for minted token (race Path A)…")
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await BotGuardWebViewRunner.shared.prepare(for: video.id) }
-                group.addTask { try? await Task.sleep(nanoseconds: 6_000_000_000) }
-                _ = await group.next()
-                group.cancelAll()
+            // A real 6 s budget — `prepare` is bounded only by its own 45 s safety
+            // timer and honours no cancellation, so the task-group form this
+            // replaced could hold Path A open for the full 45.
+            let videoId = video.id
+            await withTimeout(seconds: 6) {
+                await BotGuardWebViewRunner.shared.prepare(for: videoId)
             }
         }
         guard !Task.isCancelled else { return false }
@@ -744,6 +786,7 @@ extension PlaybackViewModel {
                 proxyItem.audioTimePitchAlgorithm = .spectral
                 proxyItem.preferredForwardBufferDuration = 0.5
                 player.replaceCurrentItem(with: proxyItem)
+                installEndAndStallObservers(for: proxyItem)
                 itemObserverTask?.cancel()
                 for await st in proxyItem.statusStream {
                     guard !Task.isCancelled else { return false }
@@ -1322,6 +1365,7 @@ extension PlaybackViewModel {
             return false
         }
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
 
         for await status in item.statusStream {
@@ -1647,6 +1691,7 @@ extension PlaybackViewModel {
                 return false
             }
             player.replaceCurrentItem(with: compositeItem)
+            installEndAndStallObservers(for: compositeItem)
             itemObserverTask?.cancel()
 
             for await status in compositeItem.statusStream {
@@ -1980,6 +2025,7 @@ extension PlaybackViewModel {
             isQualityChangePending = true
             isSwappingItem = true
             player.replaceCurrentItem(with: compositeItem)
+            installEndAndStallObservers(for: compositeItem)
             isSwappingItem = false
             itemObserverTask?.cancel()
 
@@ -2420,6 +2466,7 @@ extension PlaybackViewModel {
         }
         lastAttemptedStreamURL = masterURL
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
         for await status in item.statusStream {
             switch status {
@@ -2546,6 +2593,7 @@ extension PlaybackViewModel {
         }
 
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         for await status in item.statusStream {
             switch status {
             case .readyToPlay:
@@ -2687,6 +2735,7 @@ extension PlaybackViewModel {
             item?.preferredForwardBufferDuration = 0
         }
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
         for await status in item.statusStream {
             switch status {

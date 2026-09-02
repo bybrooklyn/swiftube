@@ -52,10 +52,30 @@ final class VideoDiskCache: @unchecked Sendable {
         let writtenBytes = data.count
         queue.async { [weak self] in
             guard let self else { return }
+            // Overwrites previously only added: re-storing a key inflated the
+            // estimate by the full new size while the old file was replaced,
+            // so estimatedBytes drifted upward and evicted fresh entries early.
+            // Subtract whatever is being replaced before adding the new write.
+            let previous = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            self.estimatedBytes -= previous
             try? data.write(to: url, options: .atomic)
             self.estimatedBytes += writtenBytes
             self.evictIfNeeded()
         }
+    }
+
+    /// Blocks until every write submitted before this call has finished.
+    ///
+    /// `store` is fire-and-forget onto a serial queue, which left tests with no
+    /// way to observe a write except to sleep and hope — they slept 100 ms, and
+    /// under load that is not always enough, so the disk-cache round-trip tests
+    /// failed intermittently in a way that looked exactly like a cache bug. A
+    /// barrier on the same serial queue is exact: it cannot run until the writes
+    /// queued ahead of it have.
+    ///
+    /// Test-facing. Production code reads through `load`, which tolerates a miss.
+    func waitForPendingWrites() {
+        queue.sync {}
     }
 
     // MARK: - Read (synchronous, called from consume() cold path on actor context)

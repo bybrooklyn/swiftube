@@ -48,6 +48,8 @@ final class AudioTrackManager {
     // MARK: - Interface
 
     func reset() {
+        loadTask?.cancel()
+        loadTask = nil
         availableAudioTracks = []
         selectedAudioTrack = nil
         audioSelectionGroup = nil
@@ -96,8 +98,17 @@ final class AudioTrackManager {
 
     /// Loads alternate audio renditions from the HLS manifest of `item` and auto-applies
     /// the user's saved language preference.
+    /// The in-flight rendition load, so a new video can cancel the old one.
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+
     func loadAudioTracks(from item: AVPlayerItem) {
-        Task { [weak self] in
+        // `loadMediaSelectionGroup` can take seconds on a cold manifest, and this
+        // used to be an untracked, uncancellable task with no identity check — so
+        // switching videos while one was in flight populated the *new* video's
+        // audio picker from the *old* video's manifest, and then applied a
+        // selection to it. `reset()` ran first and was simply overwritten.
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in
             guard let self else { return }
             let asset = item.asset
             // Fix #126: HLS variant playlists (loaded when quality changes) expose only
@@ -105,6 +116,10 @@ final class AudioTrackManager {
             // leaving no audio option selected → silent video after a quality switch.
             // Use `!isEmpty` so a single-track manifest still gets its track applied.
             let group = try? await asset.loadMediaSelectionGroup(for: .audible)
+            guard !Task.isCancelled else {
+                playerLog.notice("AudioTrackManager: rendition load superseded — discarding")
+                return
+            }
             let groupDesc = group.map { "\($0.options.count) option(s)" } ?? "nil"
             playerLog.notice("AudioTrackManager: loadMediaSelectionGroup=\(groupDesc)")
             guard let group, !group.options.isEmpty else { return }

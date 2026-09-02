@@ -38,11 +38,31 @@ final class YTProgressiveProxyLoader: NSObject, AVAssetResourceLoaderDelegate, @
     /// A new `/player` response, though, comes with a new signature and a new
     /// budget — so the way to keep playing is to re-sign, not to re-ask.
     private let renewURL: @Sendable () async -> URL?
+    // AVFoundation issues range requests concurrently, and each one gets its own
+    // unstructured Task, so these three are genuinely shared mutable state on an
+    // `@unchecked Sendable` class. They were read and written with no
+    // synchronisation at all. `stateLock` is held only across the accessors
+    // below — never across an `await`.
+    private let stateLock = NSLock()
+
     /// The URL currently being served: the original, or the latest renewal.
-    private var liveURL: URL?
+    private var _liveURL: URL?
     /// Total byte length, learned from the first ranged probe and reused after.
-    private var contentLength: Int64?
-    private var contentType: String?
+    private var _contentLength: Int64?
+    private var _contentType: String?
+
+    private var liveURL: URL? {
+        get { stateLock.withLock { _liveURL } }
+        set { stateLock.withLock { _liveURL = newValue } }
+    }
+    private var contentLength: Int64? {
+        get { stateLock.withLock { _contentLength } }
+        set { stateLock.withLock { _contentLength = newValue } }
+    }
+    private var contentType: String? {
+        get { stateLock.withLock { _contentType } }
+        set { stateLock.withLock { _contentType = newValue } }
+    }
 
     /// AVFoundation asks for "everything from here on" for a progressive file.
     /// Answering a bounded slice and finishing makes it come back for the next
@@ -54,10 +74,18 @@ final class YTProgressiveProxyLoader: NSObject, AVAssetResourceLoaderDelegate, @
     /// already serves is what turns a forbidden stream into a playing one.
     private static let maximumChunk: Int64 = 128 * 1024
 
-    /// The delegate is not retained by the asset, so assets are kept alive here
-    /// for as long as the player might use them.
+    /// `AVAssetResourceLoader.setDelegate` does not retain, so the loader has to
+    /// be kept alive elsewhere for as long as the asset might use it.
+    ///
+    /// Weak keys, strong values: the entry — and with it the loader and its
+    /// private `URLSession` — goes away when the asset does. It used to be a
+    /// plain dictionary keyed by `ObjectIdentifier`, drained only by a `release`
+    /// method that had **no call sites anywhere**, so every progressive attempt
+    /// leaked a loader and a session for the life of the process, and the retry
+    /// ladder makes several attempts per failed load.
     private static let lock = NSLock()
-    private nonisolated(unsafe) static var live: [ObjectIdentifier: YTProgressiveProxyLoader] = [:]
+    private nonisolated(unsafe) static let live = NSMapTable<AVURLAsset, YTProgressiveProxyLoader>
+        .weakToStrongObjects()
 
     private init(
         userAgent: String,
@@ -90,13 +118,28 @@ final class YTProgressiveProxyLoader: NSObject, AVAssetResourceLoaderDelegate, @
         let asset = AVURLAsset(url: proxied)
         asset.resourceLoader.setDelegate(loader, queue: DispatchQueue(label: "yt.progressive.proxy"))
 
-        lock.lock(); live[ObjectIdentifier(asset)] = loader; lock.unlock()
+        lock.lock(); live.setObject(loader, forKey: asset); lock.unlock()
         return asset
     }
 
     /// Drops the retained delegate for an asset that is finished with.
+    ///
+    /// Optional now that the registry keys weakly — releasing the asset is enough.
+    /// Kept for a caller that wants to free the session eagerly.
     static func release(_ asset: AVURLAsset) {
-        lock.lock(); live[ObjectIdentifier(asset)] = nil; lock.unlock()
+        lock.lock(); live.removeObject(forKey: asset); lock.unlock()
+    }
+
+    /// Number of live loaders. Test-facing.
+    static var liveCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return live.count
+    }
+
+    deinit {
+        // An ephemeral session holds its delegate queue and connections until it
+        // is invalidated; dropping the last reference is not enough.
+        session.invalidateAndCancel()
     }
 
     // MARK: - AVAssetResourceLoaderDelegate
