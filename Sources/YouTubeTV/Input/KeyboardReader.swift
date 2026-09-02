@@ -17,6 +17,10 @@ final class KeyboardReader {
     private var monitor: Any?
     private var handler: (NavigationIntent) -> Void = { _ in }
 
+    /// Whether a text field has focus right now. While it does, printable keys
+    /// become `.text` instead of shortcuts, and Delete becomes backspace.
+    var isTextEntryActive: () -> Bool = { false }
+
     func start(_ handler: @escaping (NavigationIntent) -> Void) {
         // Idempotent: assigning over a live monitor leaks it, and both copies
         // keep firing — every key press producing two intents.
@@ -27,10 +31,26 @@ final class KeyboardReader {
             // Let anything with a command modifier through to the menu bar so
             // ⌘Q, ⌘W and friends keep working.
             if event.modifierFlags.contains(.command) { return event }
+            if self.isTextEntryActive(), let text = Self.typedText(for: event) {
+                self.handler(.text(text))
+                return nil
+            }
             guard let intent = Self.intent(for: event) else { return event }
             self.handler(intent)
             return nil   // swallow it: navigation keys must not also beep
         }
+    }
+
+    /// The character a key press types, or backspace; nil for anything that
+    /// is navigation rather than typing (arrows, Return, Escape).
+    static func typedText(for event: NSEvent) -> String? {
+        if event.keyCode == 51 { return "\u{8}" }
+        guard !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option),
+              let text = event.characters, text.count == 1,
+              let scalar = text.unicodeScalars.first,
+              scalar.value >= 0x20, scalar.value != 0x7F, !(0xF700...0xF8FF).contains(scalar.value)
+        else { return nil }
+        return text
     }
 
     func stop() {

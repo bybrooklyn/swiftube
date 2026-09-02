@@ -13,8 +13,20 @@ private let inputLog = Logger(subsystem: "dev.bybrooklyn.youtubetv", category: "
 final class GamepadReader {
 
     private var handler: (NavigationIntent) -> Void = { _ in }
+    /// Player-only gestures — see `TransportIntent`.
+    var transportHandler: (TransportIntent) -> Void = { _ in }
     private var observers: [NSObjectProtocol] = []
     private var repeatTask: Task<Void, Never>?
+
+    /// Right trigger: a tap skips a chapter, a hold is 2×. Which one it was
+    /// is only known on release, so the hold starts on a timer.
+    private var holdTask: Task<Void, Never>?
+    private var isHoldingSpeed = false
+    /// Latched right-stick deflection, so a stick resting off centre does not
+    /// emit on every analog jitter and centring emits exactly once.
+    private var scrubDeflection: Float?
+    private let scrubThreshold: Float = 0.25
+    static let holdDelay: Duration = .milliseconds(350)
     /// The direction currently driving auto-repeat. **Derived** from the two
     /// source latches below — never written from a handler directly.
     ///
@@ -82,7 +94,14 @@ final class GamepadReader {
             pad.buttonMenu.pressedChangedHandler = nil
             pad.leftShoulder.pressedChangedHandler = nil
             pad.rightShoulder.pressedChangedHandler = nil
+            pad.leftTrigger.pressedChangedHandler = nil
+            pad.rightTrigger.pressedChangedHandler = nil
+            pad.rightThumbstick.valueChangedHandler = nil
         }
+        holdTask?.cancel()
+        holdTask = nil
+        isHoldingSpeed = false
+        scrubDeflection = nil
     }
 
     /// Drops both source latches and the derived one, and stops any repeat.
@@ -136,6 +155,44 @@ final class GamepadReader {
             guard pressed else { return }
             MainActor.assumeIsolated { self?.emit(.seek(.forward)) }
         }
+
+        // Triggers: tap for a chapter, hold the right one for 2×. These were
+        // the transport controls PlaybackViewModel already had and nothing on
+        // macOS called.
+        pad.rightTrigger.pressedChangedHandler = { [weak self] _, _, pressed in
+            MainActor.assumeIsolated { self?.handleRightTrigger(pressed: pressed) }
+        }
+        pad.leftTrigger.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard !pressed else { return }
+            MainActor.assumeIsolated { self?.transportHandler(.chapter(.backward)) }
+        }
+        pad.rightThumbstick.valueChangedHandler = { [weak self] _, x, _ in
+            MainActor.assumeIsolated { self?.handleScrub(x: x) }
+        }
+    }
+
+    private func handleRightTrigger(pressed: Bool) {
+        holdTask?.cancel()
+        if pressed {
+            holdTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.holdDelay)
+                guard !Task.isCancelled, let self else { return }
+                self.isHoldingSpeed = true
+                self.transportHandler(.holdSpeed(true))
+            }
+        } else if isHoldingSpeed {
+            isHoldingSpeed = false
+            transportHandler(.holdSpeed(false))
+        } else {
+            transportHandler(.chapter(.forward))
+        }
+    }
+
+    private func handleScrub(x: Float) {
+        let deflection: Float? = abs(x) >= scrubThreshold ? x : nil
+        guard deflection != scrubDeflection else { return }
+        scrubDeflection = deflection
+        transportHandler(.scrub(deflection))
     }
 
     private func handleDirectional(x: Float, y: Float, isStick: Bool) {

@@ -19,6 +19,11 @@ public enum NavigationIntent: Equatable, Sendable {
     /// browse surface walks cards across row ends; every other surface treats
     /// it as a move along its one axis (`asMove(horizontal:)`).
     case tab(forward: Bool)
+    /// A typed character, only while a text field (search, the comment
+    /// composer) is up — the keyboard reader asks before emitting these, so
+    /// the m/j/k/l shortcuts keep working everywhere else. `"\u{8}"` is
+    /// backspace.
+    case text(String)
 
     /// `.tab` reduced to a plain move for surfaces that are a single list —
     /// horizontal for a row of controls, vertical for a column of rows.
@@ -31,6 +36,18 @@ public enum NavigationIntent: Equatable, Sendable {
 
 public enum SeekDirection: Equatable, Sendable {
     case backward, forward
+}
+
+/// Transport gestures only a controller produces, kept apart from
+/// `NavigationIntent` because nothing but the player ever handles them.
+///
+/// Right trigger held is 2× until released; a tap of either trigger skips a
+/// chapter; the right stick scrubs — a stream of deflections while it is off
+/// centre, then `nil` when it returns, which commits the seek.
+public enum TransportIntent: Equatable, Sendable {
+    case holdSpeed(Bool)
+    case chapter(SeekDirection)
+    case scrub(Float?)
 }
 
 /// Timing for a held direction: one immediate move, a pause, then a steady

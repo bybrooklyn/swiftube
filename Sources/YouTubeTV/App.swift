@@ -5,6 +5,8 @@ import YouTubeMedia
 @main
 struct YouTubeTVApp: App {
 
+    @State private var model = AppModel()
+
     init() {
         // Headless sign-in.
         //
@@ -23,7 +25,7 @@ struct YouTubeTVApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(model: model)
                 .frame(minWidth: 1280, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
@@ -38,7 +40,45 @@ struct YouTubeTVApp: App {
             CommandGroup(replacing: .sidebar) { }
             CommandGroup(replacing: .toolbar) { }
             CommandGroup(replacing: .help) { }
+            // ⌘K: one shortcut into the search surface from anywhere. The
+            // keyboard reader passes command keys through, so this is the
+            // menu bar's to handle.
+            CommandMenu("Go") {
+                Button("Search") { model.openSearch() }
+                    .keyboardShortcut("k", modifiers: .command)
+            }
         }
+
+        // Play/pause/skip without bringing the window forward — the video
+        // may be in its PiP window or the app behind something else.
+        MenuBarExtra("YouTube", systemImage: "play.rectangle.fill") {
+            MenuBarController(model: model)
+        }
+    }
+}
+
+/// The menu-bar controller's contents.
+private struct MenuBarController: View {
+
+    let model: AppModel
+
+    var body: some View {
+        if let player = model.player {
+            Text(player.title.isEmpty ? "Loading…" : player.title)
+            Button(player.playback.isPlaying ? "Pause" : "Play") { player.playback.togglePlayPause() }
+                .keyboardShortcut(" ", modifiers: [])
+            Button("Next") { player.playback.playNext() }
+            Button("Previous") { player.playback.playPrevious() }
+            Divider()
+            if model.isPlayerDetached {
+                Button("Show player") { model.reattachPlayer() }
+            }
+        } else {
+            Text("Nothing playing")
+        }
+        Divider()
+        Button("Quit YouTube") { NSApplication.shared.terminate(nil) }
+            .keyboardShortcut("q", modifiers: .command)
     }
 }
 

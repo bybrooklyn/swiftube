@@ -38,7 +38,7 @@ struct CaptionOverlay: View {
             Spacer(minLength: 0)
             if let cue = playback.currentCaptionCue, !cue.text.isEmpty {
                 Text(cue.text)
-                    .font(.system(size: rem(1.6), weight: .medium))
+                    .font(.system(size: rem(1.6) * playback.settings.captionScale, weight: .medium))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
@@ -46,7 +46,7 @@ struct CaptionOverlay: View {
                     .padding(.vertical, rem(0.45))
                     // A solid plate, not a material: captions have to stay legible
                     // over an arbitrary frame, and glass tracks what is behind it.
-                    .background(Color.black.opacity(0.75))
+                    .background(Color.black.opacity(playback.settings.captionOpaqueBackground ? 1 : 0.75))
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous)
                         .strokeBorder(Theme.divider.opacity(0.6), lineWidth: 1))
@@ -93,6 +93,7 @@ struct StatsOverlay: View {
         if s.timeToHighQualityMs > 0 { add("Time to HQ", "\(s.timeToHighQualityMs) ms") }
         add("Cache", s.cacheStatus)
         add("Stream", s.streamType)
+        add("Retry", playback.retryStatusMessage ?? "")
         add("Host", s.streamURL)
         add("Report ID", s.reportID)
         return out
@@ -110,6 +111,17 @@ struct StatsOverlay: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+            }
+
+            // The console: what the pipeline logged last. Re-read whenever the
+            // snapshot above ticks, which is once a second while playing.
+            Divider().overlay(Theme.divider).padding(.vertical, rem(0.3))
+            ForEach(Array(DiagnosticsLogger.recent(12).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.system(size: rem(0.7), design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
         .font(.system(size: rem(0.85), design: .monospaced))

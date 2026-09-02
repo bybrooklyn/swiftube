@@ -2,7 +2,9 @@ import SwiftUI
 
 struct RootView: View {
 
-    @State private var model = AppModel()
+    /// Owned by the App, not here: the menu-bar controller and the ⌘K
+    /// command need the same model.
+    let model: AppModel
 
     var body: some View {
         // One GeometryReader at the root publishes the viewport size; every
@@ -11,6 +13,9 @@ struct RootView: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 Theme.canvas.ignoresSafeArea()
+                if model.settingsStore.settings.ambientBackdropEnabled {
+                    AmbientBackdrop(url: model.focusedThumbnailURL)
+                }
 
                 VStack(alignment: .leading, spacing: 0) {
                     TopBar(focus: model.focus,
@@ -65,7 +70,7 @@ struct RootView: View {
                 GlassHost {
                     if let cardMenu = model.cardMenu {
                         CardMenuView(model: cardMenu, onBack: { model.closeCardMenu() })
-                            .transition(.opacity)
+                            .transition(Theme.panelTransition)
                     }
                     if model.isConfirmingSignOut {
                         ConfirmDialog(

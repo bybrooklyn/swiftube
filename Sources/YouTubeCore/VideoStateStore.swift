@@ -72,6 +72,14 @@ public actor VideoStateStore: UserDefaultsBackedStore {
         persist()
     }
 
+    /// Video ids with a saved position, most recently updated first. Feeds the
+    /// macOS Continue watching shelf. Not upstream.
+    public func recent(limit: Int) -> [String] {
+        states.sorted { $0.value.timestamp > $1.value.timestamp }
+            .prefix(limit)
+            .map(\.key)
+    }
+
     /// Removes any saved position for `videoId` (e.g. when the user finishes watching).
     public func clear(videoId: String) {
         states.removeValue(forKey: videoId)

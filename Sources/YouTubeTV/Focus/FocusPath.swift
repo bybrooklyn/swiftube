@@ -1,4 +1,5 @@
 import Foundation
+import YouTubeCore
 
 // MARK: - Where focus can live
 
@@ -51,6 +52,28 @@ public enum RailItem: Hashable, Sendable {
         // Assembled from several fetches in AppModel, not one browse section.
         case .explore, .playlist: nil
         case .account, .search, .settings, .channel: nil
+        }
+    }
+
+    /// What VoiceOver says when the entry takes focus.
+    public func accessibilityLabel(channels: [Channel], accountName: String?) -> String {
+        switch self {
+        case .account:       accountName ?? "Sign in"
+        case .search:        "Search"
+        case .home:          "Home"
+        case .shorts:        "Shorts"
+        case let .channel(id): channels.first { $0.id == id }?.title ?? "Channel"
+        case .subscriptions: "Subscriptions"
+        case .library:       "Library"
+        case .explore:       "Explore"
+        case let .playlist(_, title): title
+        case .music:         "Music"
+        case .gaming:        "Gaming"
+        case .live:          "Live"
+        case .news:          "News"
+        case .podcasts:      "Podcasts"
+        case .sports:        "Sports"
+        case .settings:      "Settings"
         }
     }
 

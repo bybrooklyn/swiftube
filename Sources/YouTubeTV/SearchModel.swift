@@ -9,6 +9,10 @@ import YouTubeCore
 /// with the d-pad like everything else. Focus is a grid position rather than a
 /// responder, for the same reason the browse surface uses `BrowseNavigator` —
 /// the movement rules need to be explicit and testable.
+///
+/// Results come in rows, the way the real client groups them: what you have
+/// already watched that matches (instant, from the account's history), then
+/// channels, then videos.
 @MainActor
 @Observable
 final class SearchModel {
@@ -16,7 +20,7 @@ final class SearchModel {
     /// Where focus is on the search surface.
     enum Focus: Equatable {
         case key(Int)
-        case result(Int)
+        case result(row: Int, index: Int)
     }
 
     /// A key on the on-screen keyboard.
@@ -45,6 +49,12 @@ final class SearchModel {
         }
     }
 
+    struct Row: Identifiable {
+        let id: String
+        let title: String
+        let videos: [Video]
+    }
+
     /// Six columns of letters and digits, then a row of the three wide keys.
     /// Matching the real client's grid matters less than the shape being
     /// predictable: every letter is exactly `columns` apart vertically.
@@ -60,13 +70,45 @@ final class SearchModel {
     private(set) var query = ""
     private(set) var focus: Focus = .key(0)
     private(set) var results: [Video] = []
+    private(set) var channelResults: [Video] = []
     private(set) var isSearching = false
+
+    /// The account's watch history, fetched once when search opens, so the
+    /// "From your history" row can answer before the network does.
+    private var historyVideos: [Video] = []
 
     private let api: any InnerTubeAPIProtocol
     @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     init(api: any InnerTubeAPIProtocol) {
         self.api = api
+        Task { [weak self, api] in
+            let history = (try? await api.fetchHistory())?.videos ?? []
+            self?.historyVideos = history
+        }
+    }
+
+    // MARK: - Rows
+
+    var rows: [Row] {
+        var rows: [Row] = []
+        let text = query.trimmingCharacters(in: .whitespaces)
+        if text.count >= 2 {
+            let local = historyVideos.filter {
+                $0.title.localizedCaseInsensitiveContains(text)
+                    || $0.channelTitle.localizedCaseInsensitiveContains(text)
+            }
+            if !local.isEmpty {
+                rows.append(Row(id: "history", title: "From your history", videos: Array(local.prefix(12))))
+            }
+        }
+        if !channelResults.isEmpty {
+            rows.append(Row(id: "channels", title: "Channels", videos: channelResults))
+        }
+        if !results.isEmpty {
+            rows.append(Row(id: "results", title: "Results", videos: results))
+        }
+        return rows
     }
 
     // MARK: - Navigation
@@ -77,18 +119,22 @@ final class SearchModel {
             focus = .key(Self.nextKey(from: index, direction: direction) ?? index)
             // Right off the last column crosses into the results.
             if case .key(let i) = focus, i == index,
-               direction == .right, !results.isEmpty,
+               direction == .right, !rows.isEmpty,
                Self.isLastColumn(index) {
-                focus = .result(0)
+                focus = .result(row: 0, index: 0)
             }
-        case let .result(index):
+        case let .result(row, index):
+            let rows = rows
+            guard rows.indices.contains(row) else { focus = .key(0); return }
             switch direction {
             case .left:
-                if index == 0 { focus = .key(Self.columns - 1) } else { focus = .result(index - 1) }
+                if index == 0 { focus = .key(Self.columns - 1) } else { focus = .result(row: row, index: index - 1) }
             case .right:
-                focus = .result(min(index + 1, max(results.count - 1, 0)))
-            case .up, .down:
-                break
+                focus = .result(row: row, index: min(index + 1, max(rows[row].videos.count - 1, 0)))
+            case .up:
+                if row > 0 { focus = .result(row: row - 1, index: min(index, rows[row - 1].videos.count - 1)) }
+            case .down:
+                if row + 1 < rows.count { focus = .result(row: row + 1, index: min(index, rows[row + 1].videos.count - 1)) }
             }
         }
     }
@@ -144,10 +190,22 @@ final class SearchModel {
         }
     }
 
+    /// A physical keyboard: letters go straight into the query.
+    func type(_ text: String) {
+        if text == "\u{8}" {
+            if !query.isEmpty { query.removeLast() }
+        } else {
+            query += text
+        }
+        scheduleSearch()
+    }
+
     /// The video under focus, when focus is in the results.
     var focusedResult: Video? {
-        guard case let .result(index) = focus, results.indices.contains(index) else { return nil }
-        return results[index]
+        guard case let .result(row, index) = focus else { return nil }
+        let rows = rows
+        guard rows.indices.contains(row), rows[row].videos.indices.contains(index) else { return nil }
+        return rows[row].videos[index]
     }
 
     private func apply(_ key: Key) {
@@ -168,6 +226,7 @@ final class SearchModel {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard text.count >= 2 else {
             results = []
+            channelResults = []
             return
         }
         searchTask = Task { [weak self] in
@@ -180,13 +239,32 @@ final class SearchModel {
     private func runSearch(_ text: String) async {
         isSearching = true
         defer { isSearching = false }
-        guard let group = try? await api.search(query: text, continuationToken: nil, filter: .default) else {
-            return
-        }
+        async let videos = try? api.search(query: text, continuationToken: nil, filter: .default)
+        async let channels = try? api.searchChannels(query: text)
+        let (group, found) = await (videos, channels)
         guard !Task.isCancelled else { return }
-        results = group.videos.deduplicatedByID()
-        if case let .result(index) = focus, index >= results.count {
-            focus = results.isEmpty ? .key(0) : .result(0)
+        results = (group?.videos ?? []).deduplicatedByID()
+        channelResults = (found ?? []).map(Video.channelTile)
+        if !results.isEmpty { await SearchHistoryStore.shared.add(text) }
+        if case let .result(row, index) = focus {
+            let rows = rows
+            if !rows.indices.contains(row) || !rows[row].videos.indices.contains(index) {
+                focus = rows.isEmpty ? .key(0) : .result(row: 0, index: 0)
+            }
         }
     }
+}
+
+extension Video {
+    /// A channel drawn as a card: id is the channel id, and the badge tells
+    /// the card and `AppModel.activate` what it is.
+    static func channelTile(_ channel: Channel) -> Video {
+        Video(id: channel.id,
+              title: channel.title,
+              channelTitle: channel.subscriberCount ?? "",
+              thumbnailURL: channel.thumbnailURL,
+              badges: ["CHANNEL"])
+    }
+
+    var isChannelTile: Bool { badges.contains("CHANNEL") }
 }

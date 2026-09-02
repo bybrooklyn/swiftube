@@ -168,6 +168,32 @@ public struct AppSettings: Codable {
     /// Not upstream.
     public var downloadLimitGB: Int
 
+    // MARK: macOS leanback extras (not upstream)
+    /// Hides Home and Shorts from the guide, boots into Subscriptions, empties
+    /// up-next and turns autoplay off. Opt-in.
+    public var focusModeEnabled: Bool
+    /// Caps quality and prefetching; the app also drops to Data saver on its
+    /// own while the network path is expensive or constrained.
+    public var bandwidthProfile: BandwidthProfile
+    /// Tints the page behind the shelves with the focused thumbnail's colour.
+    public var ambientBackdropEnabled: Bool
+    /// Multiplier on the caption font. 1.0 is the default size.
+    public var captionScale: Double
+    /// Solid black plate behind captions instead of the translucent one.
+    public var captionOpaqueBackground: Bool
+
+    public enum BandwidthProfile: String, Codable, CaseIterable, Sendable {
+        case dataSaver, balanced, max
+
+        public var label: String {
+            switch self {
+            case .dataSaver: return "Data saver"
+            case .balanced:  return "Balanced"
+            case .max:       return "Max"
+            }
+        }
+    }
+
     // MARK: Schema version
     /// Persisted schema version. Starts at 1 for newly stored settings.
     /// Old JSON lacking this key decodes as 0, signalling a pre-migration store.
@@ -293,6 +319,11 @@ public struct AppSettings: Codable {
         #endif
         liquidGlassEnabled   = true
         downloadLimitGB      = 10
+        focusModeEnabled     = false
+        bandwidthProfile     = .balanced
+        ambientBackdropEnabled = true
+        captionScale         = 1.0
+        captionOpaqueBackground = false
         settingsVersion      = 1
     }
 }
@@ -359,6 +390,11 @@ extension AppSettings {
         case useTOSPlayerOnMac
         case liquidGlassEnabled
         case downloadLimitGB
+        case focusModeEnabled
+        case bandwidthProfile
+        case ambientBackdropEnabled
+        case captionScale
+        case captionOpaqueBackground
     }
 
     public init(from decoder: Decoder) throws {
@@ -404,5 +440,10 @@ extension AppSettings {
         useTOSPlayerOnMac            = c.safeDecode(Bool.self,              forKey: .useTOSPlayerOnMac,            default: d.useTOSPlayerOnMac)
         liquidGlassEnabled           = c.safeDecode(Bool.self,              forKey: .liquidGlassEnabled,           default: d.liquidGlassEnabled)
         downloadLimitGB              = c.safeDecode(Int.self,               forKey: .downloadLimitGB,              default: d.downloadLimitGB)
+        focusModeEnabled             = c.safeDecode(Bool.self,              forKey: .focusModeEnabled,             default: d.focusModeEnabled)
+        bandwidthProfile             = c.safeDecode(BandwidthProfile.self,  forKey: .bandwidthProfile,             default: d.bandwidthProfile)
+        ambientBackdropEnabled       = c.safeDecode(Bool.self,              forKey: .ambientBackdropEnabled,       default: d.ambientBackdropEnabled)
+        captionScale                 = c.safeDecode(Double.self,            forKey: .captionScale,                 default: d.captionScale)
+        captionOpaqueBackground      = c.safeDecode(Bool.self,              forKey: .captionOpaqueBackground,      default: d.captionOpaqueBackground)
     }
 }

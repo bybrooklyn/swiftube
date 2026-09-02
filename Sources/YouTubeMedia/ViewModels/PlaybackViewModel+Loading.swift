@@ -51,12 +51,14 @@ extension PlaybackViewModel {
         // still .readyToPlay, bypass the entire exhaustiveRetry race (~1.27s saved per hot
         // cycle). Re-activates AVAudioSession, wires end/stall observers, and resumes.
         // Expected: <0.1s in-app → ~0.5s reported (XCTest polling overhead only).
-        if let parked = parkedVideoId,
-           parked == video.id,
-           let parkedItem = player.currentItem,
+        // macOS port: any of the last few parked items, not only the current one.
+        if let parkedItem = takeParked(video.id),
            parkedItem.status == .readyToPlay {
             playerLog.notice("[fix12] same-video re-open — reusing parked AVPlayerItem for \(video.id)")
             parkedVideoId = nil
+            if player.currentItem !== parkedItem {
+                player.replaceCurrentItem(with: parkedItem)
+            }
             // Cancel the now-useless wkHLS serialExtract started by stop().
             #if canImport(WebKit)
             wkHLSEarlyTask?.cancel()
@@ -85,6 +87,7 @@ extension PlaybackViewModel {
             return
         }
         // Different video or parked item expired — clear parked state and tear down old item.
+        // (The item itself may stay in `parkedItems` for a later reopen.)
         if parkedVideoId != nil {
             player.replaceCurrentItem(with: nil)
             parkedVideoId = nil
@@ -955,6 +958,9 @@ extension PlaybackViewModel {
         // a short window. Saves the ~1.27s exhaustiveRetry race for hot same-video replays.
         // load() calls replaceCurrentItem(nil) when a different video is requested.
         parkedVideoId = currentVideo?.id
+        if let id = currentVideo?.id, let item = player.currentItem, item.status == .readyToPlay {
+            park(id, item)
+        }
         isPlaying = false
         #if os(iOS)
         do {

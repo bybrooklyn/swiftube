@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 import Observation
 import SwiftUI
 import YouTubeCore
@@ -116,6 +117,15 @@ final class AppModel {
         if let channelFeed {
             return [shelf(id: channelFeed.id, title: channelFeed.title, videos: channelFeed.videos)]
         }
+        // Home leads with what was left half-watched.
+        if selectedRailItem == .home, let continueWatching, !continueWatching.videos.isEmpty {
+            return [shelf(id: continueWatching.id, title: continueWatching.title, videos: continueWatching.videos)]
+                + browseShelves
+        }
+        return browseShelves
+    }
+
+    private var browseShelves: [Shelf] {
 
         // A category surface returns exactly one group, and its title is
         // whatever the fetcher produced. Those fetchers fall back to a plain
@@ -163,7 +173,10 @@ final class AppModel {
         // Order measured off the real client: Shorts sits directly under Home,
         // inside the first group; the category block is Music, Gaming, Live,
         // News, Podcasts, Sports; Settings is the last row.
-        var items: [RailItem] = [.account, .search, .home, .shorts]
+        // Focus mode takes the two algorithmic surfaces out of the guide.
+        var items: [RailItem] = settingsStore.settings.focusModeEnabled
+            ? [.account, .search]
+            : [.account, .search, .home, .shorts]
         // Capped: the guide is a menu, not the subscription manager.
         items += guideChannels.prefix(5).map { .channel($0.id) }
         items += [.subscriptions, .library,
@@ -227,6 +240,30 @@ final class AppModel {
         }
         input.start { [weak self] intent in
             self?.handle(intent)
+        }
+        // Controller transport gestures go to the player alone.
+        input.onTransport = { [weak self] intent in
+            guard let self, let player, !isPlayerDetached else { return }
+            player.handleTransport(intent)
+        }
+        // Letters type while search or the comment composer is up; otherwise
+        // they stay the m/j/k/l shortcuts.
+        input.isTextEntryActive = { [weak self] in
+            guard let self else { return false }
+            return search != nil || (player?.composer != nil && !isPlayerDetached)
+        }
+
+        // Bandwidth follows the live path: an expensive or constrained link
+        // drops Balanced to Data saver until it clears.
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let expensive = path.isExpensive || path.isConstrained
+            Task { @MainActor in self?.pathDidChange(expensive: expensive) }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
+
+        // Focus mode boots into Subscriptions; Home is not in its guide.
+        if settingsStore.settings.focusModeEnabled {
+            open(.subscriptions, recordingHistory: false)
         }
 
         // Keep the token holders current for the life of the session.
@@ -443,7 +480,7 @@ final class AppModel {
         settings = nil
         // Settings changes affect playback, so hand the new values to the
         // player the next time one is created — and to any that is live now.
-        player?.playback.updateSettings(settingsStore.settings)
+        player?.playback.updateSettings(playerSettings)
         // Settings' account row calls auth.signOut() directly, so the four
         // token holders below never heard about it and kept using a dead token
         // until the next launch. The guide's own sign-out path already fans out.
@@ -627,6 +664,14 @@ final class AppModel {
                 })
             }
         }
+        if !video.isPlaylistTile, !video.isChannelTile {
+            rows.append(.init(id: "play-next", title: "Play next", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
+                self?.enqueue(video, next: true)
+            })
+            rows.append(.init(id: "queue", title: "Add to queue", symbol: "text.badge.plus") { [weak self] in
+                self?.enqueue(video, next: false)
+            })
+        }
         if !video.isPlaylistTile {
             rows.append(.init(id: "not-interested", title: "Not interested", symbol: "eye.slash") { [weak self] in
                 self?.sendFeedback(for: video, token: video.notInterestedToken, iconType: "NOT_INTERESTED")
@@ -643,6 +688,26 @@ final class AppModel {
 
     func closeCardMenu() {
         withAnimation(Theme.stateChange) { cardMenu = nil }
+    }
+
+    // MARK: - Queue
+
+    /// "Play next" slots the video after whatever is playing; "Add to queue"
+    /// appends. `CurrentQueueStore` persists and pushes to iCloud on its own,
+    /// so the queue follows the account to the other devices; the player's
+    /// `playNext` already walks it.
+    private func enqueue(_ video: Video, next: Bool) {
+        closeCardMenu()
+        let playingIndex = player?.playback.currentVideo?.playlistIndex ?? -1
+        Task {
+            if next {
+                await CurrentQueueStore.shared.insertNext(video, afterIndex: playingIndex)
+            } else {
+                await CurrentQueueStore.shared.append(video)
+            }
+            await player?.refreshQueue()
+            notice(next ? "Playing next" : "Added to queue")
+        }
     }
 
     /// Removes the video (or its channel) from every surface and tells
@@ -727,6 +792,7 @@ final class AppModel {
         // BrowseViewModel reloads its content when the token changes.
         await browse.updateAuthToken(auth.accessToken)
         await loadGuideChannels()
+        await loadContinueWatching()
     }
 
     /// The token push alone, without reloading the feed. This is what a
@@ -748,6 +814,107 @@ final class AppModel {
         player?.playback.updateSAPISID(sapisid)
     }
 
+    // MARK: - Continue watching
+
+    /// Half-watched videos, most recent first, at the top of Home.
+    ///
+    /// `VideoStateStore` knows the ids and positions; the account's history
+    /// supplies the titles and thumbnails. Signed out there is no history, so
+    /// there is no shelf. The first three are prefetched at `.immediate` so
+    /// resuming one is warm.
+    private(set) var continueWatching: Shelf?
+
+    private func loadContinueWatching() async {
+        guard auth.isSignedIn else { continueWatching = nil; return }
+        let recent = await VideoStateStore.shared.recent(limit: 12)
+        guard !recent.isEmpty, let history = try? await api.fetchHistory() else {
+            continueWatching = nil
+            return
+        }
+        let byId = Dictionary(history.videos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var videos: [Video] = []
+        for id in recent {
+            guard var video = byId[id] else { continue }
+            if let state = await VideoStateStore.shared.state(for: id) {
+                video.watchProgress = state.watchedFraction
+            }
+            videos.append(video)
+        }
+        continueWatching = videos.isEmpty ? nil : Shelf(id: "continue-watching", title: "Continue watching", videos: videos)
+
+        let categories = settingsStore.settings.activeSponsorCategories
+        let token = auth.accessToken
+        for video in videos.prefix(3) {
+            await VideoPreloadCache.shared.prefetch(videoId: video.id, sponsorCategories: categories,
+                                                    authToken: token, priority: .immediate)
+        }
+    }
+
+    // MARK: - Bandwidth
+
+    @ObservationIgnored private let pathMonitor = NWPathMonitor()
+    private var isExpensivePath = false
+
+    private func pathDidChange(expensive: Bool) {
+        guard expensive != isExpensivePath else { return }
+        isExpensivePath = expensive
+        player?.playback.updateSettings(playerSettings)
+    }
+
+    /// The profile in force now: the chosen one, or Data saver while the
+    /// path is expensive and the choice was Balanced.
+    var effectiveBandwidthProfile: AppSettings.BandwidthProfile {
+        let chosen = settingsStore.settings.bandwidthProfile
+        return chosen == .balanced && isExpensivePath ? .dataSaver : chosen
+    }
+
+    /// Settings as the player should see them: focus mode turns autoplay off,
+    /// and the bandwidth profile caps the preferred quality.
+    var playerSettings: AppSettings {
+        var settings = settingsStore.settings
+        if settings.focusModeEnabled { settings.autoplayEnabled = false }
+        let cap: AppSettings.VideoQuality? = switch effectiveBandwidthProfile {
+        case .dataSaver: .q480
+        case .balanced:  nil
+        case .max:       nil
+        }
+        if let cap, let capHeight = cap.maxHeight,
+           settings.preferredQuality.maxHeight.map({ $0 > capHeight }) ?? true {
+            settings.preferredQuality = cap
+        }
+        return settings
+    }
+
+    // MARK: - Accessibility
+
+    /// Speaks what took focus. VoiceOver cannot follow a focus model that is
+    /// not the responder chain's, so the model tells it: card title and
+    /// position in the row, or the guide entry's label.
+    private func announceFocus() {
+        let text: String
+        switch focus {
+        case let .card(shelf, index):
+            guard let video = video(shelf: shelf, index: index) else { return }
+            let count = shelves.indices.contains(shelf) ? shelves[shelf].videos.count : 0
+            text = "\(video.title), \(index + 1) of \(count), \(shelves[shelf].title)"
+        case let .rail(item):
+            text = item.accessibilityLabel(channels: guideChannels, accountName: auth.accountName)
+        case .topBar(.search):
+            text = "Search"
+        case .topBar(.subscribe):
+            text = channelHeader?.isSubscribed == true ? "Subscribed" : "Subscribe"
+        }
+        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
+                             userInfo: [.announcement: text,
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+
+    /// The thumbnail under focus, for the ambient backdrop.
+    var focusedThumbnailURL: URL? {
+        guard case let .card(shelf, index) = focus else { return nil }
+        return video(shelf: shelf, index: index)?.thumbnailURL
+    }
+
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
@@ -765,8 +932,19 @@ final class AppModel {
             switch intent.asMove(horizontal: true) {
             case let .move(direction): search.move(direction)
             case .select:
-                // Selecting a result plays it; selecting a key types it.
-                if let video = search.focusedResult { present(video) } else { search.select() }
+                // Selecting a result plays it (or opens the channel); selecting
+                // a key types it.
+                if let video = search.focusedResult {
+                    if video.isChannelTile {
+                        closeSearch()
+                        open(.channel(video.id))
+                    } else {
+                        present(video)
+                    }
+                } else {
+                    search.select()
+                }
+            case let .text(text):      search.type(text)
             case .back:                closeSearch()
             default:                   break
             }
@@ -868,7 +1046,7 @@ final class AppModel {
                 openCardMenu(for: video)
             }
 
-        case .playPause, .seek:
+        case .playPause, .seek, .text:
             break
         }
     }
@@ -881,9 +1059,17 @@ final class AppModel {
             focus = next
             isRailExpanded = next.isInRail
         }
+        announceFocus()
         loadMoreIfNearRowEnd()
         prefetchFocusedVideo()
         prefetchThumbnails()
+    }
+
+    /// Brings a detached player's chrome back (the menu-bar controller's
+    /// "Show player").
+    func reattachPlayer() {
+        guard player != nil else { return }
+        withAnimation(Theme.travel) { isPlayerDetached = false }
     }
 
     // MARK: - Sign-out confirmation
@@ -980,7 +1166,7 @@ final class AppModel {
         let model = PlayerModel(api: api) { [weak self] channelId in
             self?.isSubscribed(toChannel: channelId) ?? false
         }
-        model.playback.updateSettings(settingsStore.settings)
+        model.playback.updateSettings(playerSettings)
         // The player keeps its own `hasAuthToken` mirror; setting the token on
         // the shared API is not enough to arm the authenticated stream paths.
         model.playback.updateAuthToken(auth.accessToken)
@@ -999,6 +1185,15 @@ final class AppModel {
         }
         withAnimation(Theme.travel) { player = model }
         model.play(video)
+        // A video chosen while a queue is waiting becomes the queue's head, so
+        // the queue carries on after it — the same rule as the real client.
+        if video.playlistId == nil {
+            Task {
+                guard await !CurrentQueueStore.shared.videos.isEmpty else { return }
+                await CurrentQueueStore.shared.insertNext(video, afterIndex: -1)
+                model.adoptQueueHead()
+            }
+        }
     }
 
     private func dismissPlayer() {
@@ -1085,6 +1280,8 @@ final class AppModel {
     /// request per keypress.
     private func prefetchFocusedVideo() {
         prefetchTask?.cancel()
+        // Data saver: nothing speculative on the wire.
+        guard effectiveBandwidthProfile != .dataSaver else { return }
         guard case let .card(shelf, index) = focus,
               let video = video(shelf: shelf, index: index) else { return }
         let categories = settingsStore.settings.activeSponsorCategories
