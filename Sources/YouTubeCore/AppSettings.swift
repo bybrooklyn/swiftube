@@ -131,6 +131,18 @@ public struct AppSettings: Codable {
     /// ~90% data reduction vs 1080p. Live streams are excluded automatically.
     public var audioOnlyMode: Bool
 
+    // MARK: Music queue
+    /// When `true` (the default), playing something from the Music tab hands it to
+    /// the dedicated music queue — shuffle, repeat, and an endless radio tail —
+    /// instead of the video player's single-item up-next. Turn it off to fall back
+    /// to the simpler pipeline every other surface uses.
+    public var musicQueueEnabled: Bool
+
+    /// Opt-in advanced control: lets the lyrics panel search and pin a different
+    /// match when automatic matching gets a song wrong. Off by default so the
+    /// panel stays a reading surface.
+    public var manualLyricsSearchEnabled: Bool
+
     // MARK: Codec preference
     /// When `true`, restricts adaptive video format selection to H.264 (`avc1`) only.
     /// Mirrors Android's `limitVideoCodec("avc1")` opt-in for devices with VP9/AV1
@@ -310,6 +322,8 @@ public struct AppSettings: Codable {
         deArrowEnabled       = false
         poTokenServiceURL    = nil
         audioOnlyMode        = false
+        musicQueueEnabled    = true
+        manualLyricsSearchEnabled = false
         preferH264           = false
         iCloudSyncEnabled    = false
         #if os(macOS)
@@ -385,6 +399,8 @@ extension AppSettings {
         case deArrowEnabled
         case poTokenServiceURL
         case audioOnlyMode
+        case musicQueueEnabled
+        case manualLyricsSearchEnabled
         case preferH264
         case iCloudSyncEnabled
         case useTOSPlayerOnMac
@@ -435,6 +451,8 @@ extension AppSettings {
         deArrowEnabled               = c.safeDecode(Bool.self,              forKey: .deArrowEnabled,               default: d.deArrowEnabled)
         poTokenServiceURL            = c.safeDecode(URL?.self,              forKey: .poTokenServiceURL,            default: d.poTokenServiceURL)
         audioOnlyMode                = c.safeDecode(Bool.self,              forKey: .audioOnlyMode,                default: d.audioOnlyMode)
+        musicQueueEnabled            = c.safeDecode(Bool.self,              forKey: .musicQueueEnabled,            default: d.musicQueueEnabled)
+        manualLyricsSearchEnabled    = c.safeDecode(Bool.self,              forKey: .manualLyricsSearchEnabled,    default: d.manualLyricsSearchEnabled)
         preferH264                   = c.safeDecode(Bool.self,              forKey: .preferH264,                   default: d.preferH264)
         iCloudSyncEnabled            = c.safeDecode(Bool.self,              forKey: .iCloudSyncEnabled,            default: d.iCloudSyncEnabled)
         useTOSPlayerOnMac            = c.safeDecode(Bool.self,              forKey: .useTOSPlayerOnMac,            default: d.useTOSPlayerOnMac)
