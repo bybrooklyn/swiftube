@@ -11,7 +11,7 @@ import YouTubeCore
 /// read it. The API surface is kept identical to upstream's `DiagnosticsLogger`
 /// so the ~19 call sites across the playback pipeline read the same, and so
 /// upstream fixes touching those lines still cherry-pick cleanly.
-struct DiagnosticsLogger: Sendable {
+public struct DiagnosticsLogger: Sendable {
 
     /// Short identifier (8 hex chars) generated once per app session.
     /// Displayed in the Stats for Nerds overlay so a session's logs can be
@@ -29,17 +29,41 @@ struct DiagnosticsLogger: Sendable {
         self.category = category
     }
 
+    // MARK: - In-app console (macOS port)
+    //
+    // The last few hundred lines, for the Stats for Nerds overlay: the retry
+    // ladder's trace and the cache verdict are only ever logged, and the
+    // unified log is not something you can read from the couch.
+
+    nonisolated(unsafe) private static var ring: [String] = []
+    private static let ringLock = NSLock()
+    private static let ringLimit = 300
+
+    private static func remember(_ category: String, _ message: String) {
+        ringLock.lock(); defer { ringLock.unlock() }
+        ring.append("[\(category)] \(message)")
+        if ring.count > ringLimit { ring.removeFirst(ring.count - ringLimit) }
+    }
+
+    /// The most recent `count` lines, oldest first.
+    public static func recent(_ count: Int) -> [String] {
+        ringLock.lock(); defer { ringLock.unlock() }
+        return Array(ring.suffix(count))
+    }
+
     // Each body evaluates the autoclosure into a local before interpolating.
     // os.Logger's interpolation is itself an *escaping* autoclosure, and an
     // escaping autoclosure may not capture a non-escaping parameter.
     func notice(_ message: @autoclosure () -> String) {
         let msg = message()
         logger.notice("\(msg, privacy: .public)")
+        Self.remember(category, msg)
     }
 
     func error(_ message: @autoclosure () -> String) {
         let msg = message()
         logger.error("\(msg, privacy: .public)")
+        Self.remember(category, "❌ " + msg)
     }
 
     func debug(_ message: @autoclosure () -> String) {

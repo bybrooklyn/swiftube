@@ -13,6 +13,12 @@ final class InputRouter {
         set { keyboard.isTextEntryActive = newValue }
     }
 
+    /// Controller transport gestures — see `TransportIntent`.
+    var onTransport: (TransportIntent) -> Void {
+        get { gamepad.transportHandler }
+        set { gamepad.transportHandler = newValue }
+    }
+
     func start(_ handler: @escaping (NavigationIntent) -> Void) {
         gamepad.start(handler)
         keyboard.start(handler)

@@ -367,7 +367,7 @@ private struct Scrubber: View {
                 // it at all.
                 Capsule()
                     .fill(Theme.textPrimary)
-                    .frame(width: width * CGFloat(model.progress))
+                    .frame(width: width * CGFloat(model.displayProgress))
 
                 // Chapter boundaries as gaps in the bar, which is how the real
                 // client segments long videos.
@@ -379,6 +379,26 @@ private struct Scrubber: View {
                             .frame(width: 2)
                             .offset(x: x)
                     }
+                }
+            }
+            // While scrubbing, the chapter under the playhead floats above it —
+            // the preview the real client gives, minus the storyboard frame
+            // (the player response's storyboards are not parsed).
+            // ponytail: chapter title only; add storyboard frames when they are parsed.
+            .overlay(alignment: .topLeading) {
+                if model.playback.isScrubbing, let title = model.chapterTitle(at: model.displayTime) {
+                    let x = width * CGFloat(model.displayProgress)
+                    Text(title)
+                        .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .padding(.horizontal, Theme.Metrics.rem(0.6, viewport))
+                        .padding(.vertical, Theme.Metrics.rem(0.3, viewport))
+                        .background(Color.black.opacity(0.85),
+                                    in: .rect(cornerRadius: Theme.Metrics.badgeCorner(viewport)))
+                        .fixedSize()
+                        .offset(x: min(max(x - Theme.Metrics.rem(6, viewport), 0), width - Theme.Metrics.rem(12, viewport)),
+                                y: -Theme.Metrics.rem(2.2, viewport))
                 }
             }
         }

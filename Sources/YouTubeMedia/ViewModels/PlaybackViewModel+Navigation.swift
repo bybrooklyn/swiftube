@@ -74,6 +74,16 @@ extension PlaybackViewModel {
         playNextFromSuggestions()
     }
 
+    /// Marks the playing video as index 0 of the Current Queue, so `playNext`
+    /// walks the queue from it. The macOS client inserts a freshly chosen
+    /// video at the head of a waiting queue; this is the matching tag.
+    public func tagCurrentVideoAsQueueHead() {
+        guard var video = currentVideo, video.playlistId == nil else { return }
+        video.playlistId = CurrentQueueStore.playlistID
+        video.playlistIndex = 0
+        currentVideo = video
+    }
+
     private func playNextFromSuggestions() {
         guard let next = relatedVideos.first else { return }
         playerLog.notice("playNext: id=\(next.id)")

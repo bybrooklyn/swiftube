@@ -67,7 +67,92 @@ final class PlayerModel {
     /// What plays next. `PlaybackViewModel` already fills this from `/next` and
     /// already autoplays the first entry when a video ends — until now nothing
     /// ever showed it, so playback looked like a dead end even though it was not.
-    var upNext: [Video] { playback.settings.focusModeEnabled ? [] : playback.relatedVideos }
+    var upNext: [Video] {
+        if playback.settings.focusModeEnabled { return [] }
+        return queueRemaining + playback.relatedVideos.filter { related in
+            !queueRemaining.contains { $0.id == related.id }
+        }
+    }
+
+    // MARK: - Queue
+
+    /// What is left of the Current Queue after the playing video, each entry
+    /// tagged so playing it keeps the queue walking. A snapshot: the store is
+    /// an actor with nothing to observe, so it is refreshed on play and after
+    /// an enqueue.
+    private(set) var queueRemaining: [Video] = []
+
+    func refreshQueue() async {
+        let index = playback.currentVideo?.playlistIndex ?? -1
+        let isQueue = playback.currentVideo?.playlistId == CurrentQueueStore.playlistID || index < 0
+        queueRemaining = isQueue ? await CurrentQueueStore.shared.remainingVideos(after: index) : []
+    }
+
+    /// The playing video was just inserted at the head of the queue: tag it
+    /// so `playNext` walks the queue from it.
+    func adoptQueueHead() {
+        playback.tagCurrentVideoAsQueueHead()
+        Task { await refreshQueue() }
+    }
+
+    // MARK: - Controller transport
+
+    @ObservationIgnored private var scrubTask: Task<Void, Never>?
+
+    func handleTransport(_ intent: TransportIntent) {
+        switch intent {
+        case let .holdSpeed(on):
+            if on { playback.beginHoldSpeed() } else { playback.endHoldSpeed() }
+        case .chapter(.forward):
+            playback.skipToNextChapter()
+        case .chapter(.backward):
+            playback.skipToPreviousChapter()
+        case let .scrub(deflection):
+            scrub(deflection)
+        }
+        showControls()
+    }
+
+    /// Stick scrubbing: while deflected, the scrub position moves at a rate
+    /// that grows with the deflection; centring commits, snapped to a chapter
+    /// start when one is within reach.
+    private func scrub(_ deflection: Float?) {
+        scrubTask?.cancel()
+        guard let deflection else {
+            guard playback.isScrubbing else { return }
+            if let chapter = playback.chapters.first(where: { abs($0.startTime - playback.scrubTime) < Self.chapterSnap }) {
+                playback.updateScrub(to: chapter.startTime)
+            }
+            playback.commitScrub()
+            return
+        }
+        if !playback.isScrubbing { playback.beginScrubbing() }
+        // 1% of the video per tick at full deflection, squared so a light push
+        // is fine control and a hard one is fast travel.
+        let step = playback.duration * 0.01 * Double(deflection * abs(deflection))
+        scrubTask = Task { [weak self] in
+            while !Task.isCancelled, let self {
+                let target = min(max(self.playback.scrubTime + step, 0), self.playback.duration)
+                self.playback.updateScrub(to: target)
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+    }
+
+    private static let chapterSnap: TimeInterval = 4
+
+    /// Where the playhead is drawn: the scrub position while scrubbing.
+    var displayTime: TimeInterval { playback.isScrubbing ? playback.scrubTime : playback.currentTime }
+
+    var displayProgress: Double {
+        guard playback.duration > 0 else { return 0 }
+        return min(max(displayTime / playback.duration, 0), 1)
+    }
+
+    func chapterTitle(at time: TimeInterval) -> String? {
+        let title = playback.chapters.last { $0.startTime <= time }?.title
+        return title?.isEmpty == false ? title : nil
+    }
 
     // MARK: - Comments
 
@@ -139,9 +224,9 @@ final class PlayerModel {
     /// "2:34 • Yasumu - We Met" — position, plus the chapter name when the video
     /// has chapters. On a long mix the chapter is the only useful position cue.
     var positionLabel: String {
-        let time = formatDuration(playback.currentTime)
-        if let chapter = playback.currentChapter, !chapter.title.isEmpty {
-            return "\(time) • \(chapter.title)"
+        let time = formatDuration(displayTime)
+        if let chapter = chapterTitle(at: displayTime) {
+            return "\(time) • \(chapter)"
         }
         return time
     }
@@ -166,6 +251,7 @@ final class PlayerModel {
         playback.load(video: video)
         showControls()
         loadChannelAvatar(for: video.channelId)
+        Task { await refreshQueue() }
     }
 
     /// Refreshes the avatar for whatever is playing now.

@@ -26,6 +26,18 @@ public enum SeekDirection: Equatable, Sendable {
     case backward, forward
 }
 
+/// Transport gestures only a controller produces, kept apart from
+/// `NavigationIntent` because nothing but the player ever handles them.
+///
+/// Right trigger held is 2× until released; a tap of either trigger skips a
+/// chapter; the right stick scrubs — a stream of deflections while it is off
+/// centre, then `nil` when it returns, which commits the seek.
+public enum TransportIntent: Equatable, Sendable {
+    case holdSpeed(Bool)
+    case chapter(SeekDirection)
+    case scrub(Float?)
+}
+
 /// Timing for a held direction: one immediate move, a pause, then a steady
 /// repeat. Matches the cadence of TV remotes closely enough that holding a
 /// direction to cross a long row feels normal rather than laggy or runaway.

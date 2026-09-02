@@ -93,6 +93,7 @@ struct StatsOverlay: View {
         if s.timeToHighQualityMs > 0 { add("Time to HQ", "\(s.timeToHighQualityMs) ms") }
         add("Cache", s.cacheStatus)
         add("Stream", s.streamType)
+        add("Retry", playback.retryStatusMessage ?? "")
         add("Host", s.streamURL)
         add("Report ID", s.reportID)
         return out
@@ -110,6 +111,17 @@ struct StatsOverlay: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+            }
+
+            // The console: what the pipeline logged last. Re-read whenever the
+            // snapshot above ticks, which is once a second while playing.
+            Divider().overlay(Theme.divider).padding(.vertical, rem(0.3))
+            ForEach(Array(DiagnosticsLogger.recent(12).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.system(size: rem(0.7), design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
         .font(.system(size: rem(0.85), design: .monospaced))

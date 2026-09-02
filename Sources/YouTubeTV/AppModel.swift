@@ -241,6 +241,11 @@ final class AppModel {
         input.start { [weak self] intent in
             self?.handle(intent)
         }
+        // Controller transport gestures go to the player alone.
+        input.onTransport = { [weak self] intent in
+            guard let self, let player, !isPlayerDetached else { return }
+            player.handleTransport(intent)
+        }
         // Letters type while search or the comment composer is up; otherwise
         // they stay the m/j/k/l shortcuts.
         input.isTextEntryActive = { [weak self] in
@@ -620,6 +625,14 @@ final class AppModel {
                 })
             }
         }
+        if !video.isPlaylistTile, !video.isChannelTile {
+            rows.append(.init(id: "play-next", title: "Play next", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
+                self?.enqueue(video, next: true)
+            })
+            rows.append(.init(id: "queue", title: "Add to queue", symbol: "text.badge.plus") { [weak self] in
+                self?.enqueue(video, next: false)
+            })
+        }
         if !video.isPlaylistTile {
             rows.append(.init(id: "not-interested", title: "Not interested", symbol: "eye.slash") { [weak self] in
                 self?.sendFeedback(for: video, token: video.notInterestedToken, iconType: "NOT_INTERESTED")
@@ -636,6 +649,26 @@ final class AppModel {
 
     func closeCardMenu() {
         withAnimation(Theme.stateChange) { cardMenu = nil }
+    }
+
+    // MARK: - Queue
+
+    /// "Play next" slots the video after whatever is playing; "Add to queue"
+    /// appends. `CurrentQueueStore` persists and pushes to iCloud on its own,
+    /// so the queue follows the account to the other devices; the player's
+    /// `playNext` already walks it.
+    private func enqueue(_ video: Video, next: Bool) {
+        closeCardMenu()
+        let playingIndex = player?.playback.currentVideo?.playlistIndex ?? -1
+        Task {
+            if next {
+                await CurrentQueueStore.shared.insertNext(video, afterIndex: playingIndex)
+            } else {
+                await CurrentQueueStore.shared.append(video)
+            }
+            await player?.refreshQueue()
+            notice(next ? "Playing next" : "Added to queue")
+        }
     }
 
     /// Removes the video (or its channel) from every surface and tells
@@ -1150,6 +1183,15 @@ final class AppModel {
         }
         withAnimation(Theme.travel) { player = model }
         model.play(video)
+        // A video chosen while a queue is waiting becomes the queue's head, so
+        // the queue carries on after it — the same rule as the real client.
+        if video.playlistId == nil {
+            Task {
+                guard await !CurrentQueueStore.shared.videos.isEmpty else { return }
+                await CurrentQueueStore.shared.insertNext(video, afterIndex: -1)
+                model.adoptQueueHead()
+            }
+        }
     }
 
     private func dismissPlayer() {
