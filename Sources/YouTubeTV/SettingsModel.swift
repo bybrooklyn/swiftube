@@ -92,6 +92,16 @@ final class SettingsModel {
             }
         })
 
+        rows.append(Row(id: "h.music", kind: .header, title: "Music"))
+        rows.append(Row(id: "m.queue", kind: .setting, title: "Music queue",
+                        value: settings.musicQueueEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.musicQueueEnabled.toggle() }
+        })
+        rows.append(Row(id: "m.lyricsfix", kind: .setting, title: "Search & fix lyrics",
+                        value: settings.manualLyricsSearchEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.manualLyricsSearchEnabled.toggle() }
+        })
+
         rows.append(Row(id: "h.content", kind: .header, title: "Content"))
         rows.append(Row(id: "c.shorts", kind: .setting, title: "Hide Shorts",
                         value: settings.hideShorts ? "On" : "Off") { [weak self] in
