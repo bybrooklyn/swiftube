@@ -12,6 +12,11 @@ struct ConfirmDialog: View {
     let title: String
     let detail: String
     var symbol: String = "questionmark.circle"
+    /// With a pointer: the panel is the yes, the dimmed surface behind it the
+    /// no — the same two answers, with the destructive one still the one you
+    /// have to aim at.
+    var onConfirm: () -> Void = {}
+    var onCancel: () -> Void = {}
 
     @Environment(\.viewportSize) private var viewport
 
@@ -22,6 +27,7 @@ struct ConfirmDialog: View {
             // Dims the surface behind it so it reads as modal rather than as
             // another card on the page.
             Color.black.opacity(0.6).ignoresSafeArea()
+                .onTapGesture { onCancel() }
 
             VStack(spacing: rem(0.9)) {
                 Image(systemName: symbol)
@@ -47,6 +53,8 @@ struct ConfirmDialog: View {
             .padding(rem(2.2))
             .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: rem(1), style: .continuous))
+            .contentShape(.rect)
+            .onTapGesture { onConfirm() }
         }
     }
 }

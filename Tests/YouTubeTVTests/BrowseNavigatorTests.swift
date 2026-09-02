@@ -344,4 +344,55 @@ struct BrowseNavigatorTests {
     func searchSurvivesLayoutChange() {
         #expect(BrowseNavigator.clamped(.topBar(.search), to: layout) == .topBar(.search))
     }
+
+    // MARK: - Tab order
+
+    private func tab(_ focus: BrowseFocus, forward: Bool, layout: BrowseLayout,
+                     memory: inout BrowseNavigator.ColumnMemory) -> BrowseFocus {
+        BrowseNavigator.nextInReadingOrder(from: focus, forward: forward, layout: layout, memory: &memory)
+    }
+
+    @Test("tab continues from the end of a row onto the next row's first card")
+    func tabWrapsToNextRow() {
+        var memory = BrowseNavigator.ColumnMemory()
+        #expect(tab(.card(shelf: 0, index: 4), forward: true, layout: layout, memory: &memory)
+                == .card(shelf: 1, index: 0))
+        #expect(tab(.card(shelf: 0, index: 1), forward: true, layout: layout, memory: &memory)
+                == .card(shelf: 0, index: 2))
+    }
+
+    @Test("shift-tab backs from a row start onto the previous row's last card")
+    func shiftTabWrapsToPreviousRow() {
+        var memory = BrowseNavigator.ColumnMemory()
+        #expect(tab(.card(shelf: 1, index: 0), forward: false, layout: layout, memory: &memory)
+                == .card(shelf: 0, index: 4))
+    }
+
+    @Test("tab skips an empty shelf and stops at the last card")
+    func tabSkipsEmptyShelfAndStopsAtEnd() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let gappy = BrowseLayout(shelfSizes: [2, 0, 3])
+        #expect(tab(.card(shelf: 0, index: 1), forward: true, layout: gappy, memory: &memory)
+                == .card(shelf: 2, index: 0))
+        #expect(tab(.card(shelf: 2, index: 2), forward: true, layout: gappy, memory: &memory)
+                == .card(shelf: 2, index: 2))
+    }
+
+    @Test("shift-tab from the first card reaches the header, then the search bar")
+    func shiftTabClimbsToTopBar() {
+        var memory = BrowseNavigator.ColumnMemory()
+        #expect(tab(.card(shelf: 0, index: 0), forward: false, layout: channelLayout, memory: &memory)
+                == .topBar(.subscribe))
+        #expect(tab(.topBar(.subscribe), forward: false, layout: channelLayout, memory: &memory)
+                == .topBar(.search))
+        #expect(tab(.topBar(.search), forward: true, layout: layout, memory: &memory)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("tab inside the guide walks its entries and stays in the guide")
+    func tabInGuideWalksEntries() {
+        var memory = BrowseNavigator.ColumnMemory()
+        #expect(tab(.rail(.home), forward: true, layout: layout, memory: &memory) == .rail(.shorts))
+        #expect(tab(.rail(.home), forward: false, layout: layout, memory: &memory) == .rail(.search))
+    }
 }

@@ -588,7 +588,7 @@ final class AppModel {
         }
 
         if let search {
-            switch intent {
+            switch intent.asMove(horizontal: true) {
             case let .move(direction): search.move(direction)
             case .select:
                 // Selecting a result plays it; selecting a key types it.
@@ -609,7 +609,7 @@ final class AppModel {
         }
 
         if let settings {
-            switch intent {
+            switch intent.asMove(horizontal: false) {
             case let .move(direction): settings.move(direction)
             case .select:              settings.select()
             case .back:                closeSettings()
@@ -628,14 +628,12 @@ final class AppModel {
         case let .move(direction):
             let next = BrowseNavigator.next(from: focus, direction: direction,
                                             layout: layout, memory: &memory)
-            guard next != focus else { return }
-            withAnimation(Theme.stateChange) {
-                focus = next
-                isRailExpanded = next.isInRail
-            }
-            loadMoreIfNearRowEnd()
-            prefetchFocusedVideo()
-            prefetchThumbnails()
+            moveFocus(to: next)
+
+        case let .tab(forward):
+            let next = BrowseNavigator.nextInReadingOrder(from: focus, forward: forward,
+                                                          layout: layout, memory: &memory)
+            moveFocus(to: next)
 
         case .select:
             switch focus {
@@ -685,6 +683,19 @@ final class AppModel {
         }
     }
 
+    /// A key- or wheel-driven focus change on the browse surface, with the
+    /// prefetching that follows it.
+    private func moveFocus(to next: BrowseFocus) {
+        guard next != focus else { return }
+        withAnimation(Theme.stateChange) {
+            focus = next
+            isRailExpanded = next.isInRail
+        }
+        loadMoreIfNearRowEnd()
+        prefetchFocusedVideo()
+        prefetchThumbnails()
+    }
+
     // MARK: - Pointer
 
     /// Where the cursor was when focus last moved by key press. Hover events
@@ -693,8 +704,56 @@ final class AppModel {
     @ObservationIgnored private var pointerAnchor: CGPoint = .zero
 
     private func pointerHasMoved() -> Bool {
+        // A held button is a drag, not pointing. Moving the mouse with the
+        // button down streams hover events; each one moved focus, the strip
+        // travelled under the still cursor, and the next card's hover moved it
+        // again — the page scrolled with the drag like an old browser's
+        // autoscroll. Hover-driven focus waits for the button to come up.
+        guard NSEvent.pressedMouseButtons == 0 else { return false }
         let now = NSEvent.mouseLocation
         return hypot(now.x - pointerAnchor.x, now.y - pointerAnchor.y) > 2
+    }
+
+    // Pointer access to the overlays. Each hovers through the same movement
+    // gate the cards use and clicks through the same intent path a Select
+    // press takes, so a click can never do something a key press could not.
+
+    func hover(search target: SearchModel.Focus) {
+        guard pointerHasMoved() else { return }
+        search?.focus(on: target)
+    }
+
+    func click(search target: SearchModel.Focus) {
+        pointerAnchor = .zero
+        search?.focus(on: target)
+        handle(.select)
+    }
+
+    func hover(settingsRow index: Int) {
+        guard pointerHasMoved() else { return }
+        settings?.focus(row: index)
+    }
+
+    func click(settingsRow index: Int) {
+        pointerAnchor = .zero
+        settings?.focus(row: index)
+        handle(.select)
+    }
+
+    func hover(topBar item: TopBarItem) {
+        guard pointerHasMoved(), focus != .topBar(item) else { return }
+        withAnimation(Theme.stateChange) {
+            memory.remember(focus)
+            focus = .topBar(item)
+            isRailExpanded = false
+        }
+    }
+
+    func click(topBar item: TopBarItem) {
+        pointerAnchor = .zero
+        hover(topBar: item)
+        focus = .topBar(item)
+        handle(.select)
     }
 
 

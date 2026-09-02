@@ -10,6 +10,9 @@ import YouTubeMedia
 struct SettingsView: View {
 
     @Bindable var model: SettingsModel
+    /// Rows are navigable with the pointer as well as the d-pad.
+    var onHover: (Int) -> Void = { _ in }
+    var onSelect: (Int) -> Void = { _ in }
     @Environment(\.viewportSize) private var viewport
 
     var body: some View {
@@ -39,6 +42,9 @@ struct SettingsView: View {
                             .padding(.top, Theme.Metrics.rem(0.75, viewport))
                     case .setting:
                         settingRow(row, isFocused: model.focusedRow == index)
+                            .contentShape(.rect)
+                            .onHover { inside in if inside { onHover(index) } }
+                            .onTapGesture { onSelect(index) }
                     }
                 }
             }

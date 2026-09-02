@@ -10,6 +10,9 @@ struct TopBar: View {
     let focus: BrowseFocus
     let accountAvatarURL: URL?
     let isPremium: Bool
+    /// The search pill is navigable with the pointer as well as the d-pad.
+    var onHover: (TopBarItem) -> Void = { _ in }
+    var onSelect: (TopBarItem) -> Void = { _ in }
 
     @Environment(\.viewportSize) private var viewport
 
@@ -54,6 +57,9 @@ struct TopBar: View {
                                    lineWidth: focusedItem == .search
                                        ? Theme.Metrics.focusRingWidth(viewport) : 0)
         }
+        .contentShape(.capsule)
+        .onHover { inside in if inside { onHover(.search) } }
+        .onTapGesture { onSelect(.search) }
     }
 
     /// Drawn rather than shipped as an asset — there is no asset catalog in this

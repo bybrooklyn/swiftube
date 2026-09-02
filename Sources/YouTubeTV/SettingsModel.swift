@@ -131,6 +131,14 @@ final class SettingsModel {
         }
     }
 
+    /// Puts focus on a row directly — the pointer's way in. Headers are not
+    /// focusable here either.
+    func focus(row index: Int) {
+        let rows = rows
+        guard rows.indices.contains(index), rows[index].kind == .setting else { return }
+        focusedRow = index
+    }
+
     /// Headers are skipped: they exist to group rows, not to be landed on.
     private func nextSelectable(from index: Int, step: Int, in rows: [Row]) -> Int? {
         var candidate = index + step

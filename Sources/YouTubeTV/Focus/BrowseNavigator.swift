@@ -146,6 +146,60 @@ public enum BrowseNavigator {
         }
     }
 
+    /// Tab order: the next (or previous) element reading left to right, top to
+    /// bottom. Unlike `.move(.right)`, the end of a row continues onto the next
+    /// row's first card, and the start of a row backs onto the previous row's
+    /// last card, then the header, then the search bar. Inside the guide it
+    /// walks the entries; it never leaves the guide, since Right already does.
+    public static func nextInReadingOrder(
+        from focus: BrowseFocus,
+        forward: Bool,
+        layout: BrowseLayout,
+        memory: inout ColumnMemory
+    ) -> BrowseFocus {
+        let result: BrowseFocus
+        switch focus {
+        case .rail:
+            result = resolve(from: focus, direction: forward ? .down : .up, layout: layout, memory: memory)
+
+        case .topBar(.search):
+            if !forward { result = focus }
+            else if layout.hasChannelHeader { result = .topBar(.subscribe) }
+            else { result = firstCard(layout: layout) ?? focus }
+
+        case .topBar(.subscribe):
+            if forward { result = firstCard(layout: layout) ?? focus }
+            else { result = layout.hasTopBar ? .topBar(.search) : focus }
+
+        case let .card(shelf, index):
+            if forward {
+                if layout.isFocusable(shelf: shelf), index + 1 < layout.shelfSizes[shelf] {
+                    result = .card(shelf: shelf, index: index + 1)
+                } else if let below = nextFocusableShelf(after: shelf, layout: layout) {
+                    result = .card(shelf: below, index: 0)
+                } else {
+                    result = focus
+                }
+            } else {
+                if index > 0 {
+                    result = .card(shelf: shelf, index: index - 1)
+                } else if let above = previousFocusableShelf(before: shelf, layout: layout) {
+                    result = .card(shelf: above, index: layout.shelfSizes[above] - 1)
+                } else if layout.hasChannelHeader {
+                    result = .topBar(.subscribe)
+                } else {
+                    result = layout.hasTopBar ? .topBar(.search) : focus
+                }
+            }
+        }
+        memory.remember(result)
+        return result
+    }
+
+    private static func firstCard(layout: BrowseLayout) -> BrowseFocus? {
+        layout.firstFocusableShelf.map { .card(shelf: $0, index: 0) }
+    }
+
     /// Focus to use when there is no remembered position — the first chip if the
     /// surface has chips, otherwise the first card of the first loaded shelf.
     public static func defaultContentFocus(layout: BrowseLayout) -> BrowseFocus {

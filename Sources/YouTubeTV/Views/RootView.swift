@@ -15,7 +15,9 @@ struct RootView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     TopBar(focus: model.focus,
                            accountAvatarURL: model.auth.accountAvatarURL,
-                           isPremium: false)
+                           isPremium: false,
+                           onHover: { model.hover(topBar: $0) },
+                           onSelect: { model.click(topBar: $0) })
                     if let channel = model.channelHeader {
                         ChannelHeader(channel: channel,
                                       isFocused: model.focus == .topBar(.subscribe),
@@ -54,12 +56,16 @@ struct RootView: View {
                 }
 
                 if let search = model.search {
-                    SearchView(model: search)
+                    SearchView(model: search,
+                               onHover: { model.hover(search: $0) },
+                               onSelect: { model.click(search: $0) })
                         .zIndex(3)
                 }
 
                 if let settings = model.settings {
-                    SettingsView(model: settings)
+                    SettingsView(model: settings,
+                                 onHover: { model.hover(settingsRow: $0) },
+                                 onSelect: { model.click(settingsRow: $0) })
                         .zIndex(3)
                 }
 
@@ -67,7 +73,9 @@ struct RootView: View {
                     ConfirmDialog(
                         title: "Sign out of YouTube?",
                         detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
-                        symbol: "person.crop.circle.badge.xmark"
+                        symbol: "person.crop.circle.badge.xmark",
+                        onConfirm: { model.confirmSignOut() },
+                        onCancel: { model.cancelSignOut() }
                     )
                     .transition(.opacity)
                     .zIndex(4)
