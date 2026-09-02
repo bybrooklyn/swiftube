@@ -25,9 +25,6 @@ struct GuideRail: View {
     let channels: [Channel]
     let accountName: String?
     let accountAvatarURL: URL?
-    /// The guide is navigable with the pointer as well as the d-pad.
-    var onHover: (RailItem) -> Void = { _ in }
-    var onSelect: (RailItem) -> Void = { _ in }
 
     @Environment(\.viewportSize) private var viewport
 
@@ -54,9 +51,6 @@ struct GuideRail: View {
                     if needsDividerBefore(item) { divider }
                     row(for: item)
                         .frame(height: Theme.Metrics.railItemHeight(viewport))
-                        .contentShape(.rect)
-                        .onHover { inside in if inside { onHover(item) } }
-                        .onTapGesture { onSelect(item) }
                 }
             }
             .offset(y: scrollOffset(in: geo.size))

@@ -15,13 +15,10 @@ struct RootView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     TopBar(focus: model.focus,
                            accountAvatarURL: model.auth.accountAvatarURL,
-                           isPremium: false,
-                           onHover: { model.hover(topBar: $0) },
-                           onSelect: { model.click(topBar: $0) })
+                           isPremium: false)
                     if let channel = model.channelHeader {
                         ChannelHeader(channel: channel,
-                                      isFocused: model.focus == .topBar(.subscribe),
-                                      onSelect: { model.toggleSubscription() })
+                                      isFocused: model.focus == .topBar(.subscribe))
                             .padding(.horizontal, Theme.Metrics.contentInset(geo.size))
                             .padding(.bottom, Theme.Metrics.rem(1.25, geo.size))
                             .transition(.opacity)
@@ -45,9 +42,7 @@ struct RootView: View {
                           selected: model.selectedRailItem,
                           channels: model.guideChannels,
                           accountName: model.auth.accountName,
-                          accountAvatarURL: model.auth.accountAvatarURL,
-                          onHover: { model.hover(rail: $0) },
-                          onSelect: { model.click(rail: $0) })
+                          accountAvatarURL: model.auth.accountAvatarURL)
 
                 if model.isLoading {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,16 +51,12 @@ struct RootView: View {
                 }
 
                 if let search = model.search {
-                    SearchView(model: search,
-                               onHover: { model.hover(search: $0) },
-                               onSelect: { model.click(search: $0) })
+                    SearchView(model: search)
                         .zIndex(3)
                 }
 
                 if let settings = model.settings {
-                    SettingsView(model: settings,
-                                 onHover: { model.hover(settingsRow: $0) },
-                                 onSelect: { model.click(settingsRow: $0) })
+                    SettingsView(model: settings)
                         .zIndex(3)
                 }
 
@@ -73,9 +64,7 @@ struct RootView: View {
                     ConfirmDialog(
                         title: "Sign out of YouTube?",
                         detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
-                        symbol: "person.crop.circle.badge.xmark",
-                        onConfirm: { model.confirmSignOut() },
-                        onCancel: { model.cancelSignOut() }
+                        symbol: "person.crop.circle.badge.xmark"
                     )
                     .transition(.opacity)
                     .zIndex(4)
@@ -92,7 +81,6 @@ struct RootView: View {
                         .zIndex(1)
                 }
             }
-            .overlay(alignment: .topLeading) { TrafficLights() }
             // Pinned to the window, and clipped.
             //
             // A ZStack takes the size of its largest child, and the shelf rows

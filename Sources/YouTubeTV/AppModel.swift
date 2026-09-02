@@ -570,13 +570,6 @@ final class AppModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
-        // Any key press re-anchors the pointer. Expanding the guide shifts the
-        // shelves right under a stationary cursor, and SwiftUI then fires
-        // `.onHover` for whichever card slid beneath it — which pulled focus
-        // straight back out of the guide. Hover only counts once the pointer
-        // has physically moved since the last key press.
-        pointerAnchor = NSEvent.mouseLocation
-
         // Sign-in is modal, but it must still hear Back — swallowing every
         // intent here left the screen with no way out.
         if isSigningIn {
@@ -696,115 +689,10 @@ final class AppModel {
         prefetchThumbnails()
     }
 
-    // MARK: - Pointer
-
-    /// Where the cursor was when focus last moved by key press. Hover events
-    /// arriving while the cursor is still there are the content moving under a
-    /// still mouse, not the user pointing at something.
-    @ObservationIgnored private var pointerAnchor: CGPoint = .zero
-
-    private func pointerHasMoved() -> Bool {
-        // A held button is a drag, not pointing: hover-driven focus waits for
-        // it to come up.
-        guard NSEvent.pressedMouseButtons == 0 else { return false }
-        let now = NSEvent.mouseLocation
-        return hypot(now.x - pointerAnchor.x, now.y - pointerAnchor.y) > 2
-    }
-
-    /// Consumes the pointer movement that a hover just spent.
-    ///
-    /// The anchor used to be set only by key presses, so a hover-driven focus
-    /// change left it stale: the row (or the guide) travelled to park the
-    /// hovered element, a *different* element slid under the still cursor,
-    /// and its hover passed the movement test against the old anchor — which
-    /// moved focus again, which travelled again. The page scrolled itself to
-    /// the end of a row or the bottom of the feed like an old browser's
-    /// autoscroll, from a single hover or a click-drag. Anchoring here means
-    /// content moving under a still cursor is never a second move.
-    private func pointerDidFocus() {
-        pointerAnchor = NSEvent.mouseLocation
-    }
-
-    // Pointer access to the overlays. Each hovers through the same movement
-    // gate the cards use and clicks through the same intent path a Select
-    // press takes, so a click can never do something a key press could not.
-
-    func hover(search target: SearchModel.Focus) {
-        guard pointerHasMoved() else { return }
-        search?.focus(on: target)
-        pointerDidFocus()
-    }
-
-    func click(search target: SearchModel.Focus) {
-        pointerAnchor = .zero
-        search?.focus(on: target)
-        handle(.select)
-    }
-
-    func hover(settingsRow index: Int) {
-        guard pointerHasMoved() else { return }
-        settings?.focus(row: index)
-        pointerDidFocus()
-    }
-
-    func click(settingsRow index: Int) {
-        pointerAnchor = .zero
-        settings?.focus(row: index)
-        handle(.select)
-    }
-
-    func hover(topBar item: TopBarItem) {
-        guard pointerHasMoved(), focus != .topBar(item) else { return }
-        withAnimation(Theme.stateChange) {
-            memory.remember(focus)
-            focus = .topBar(item)
-            isRailExpanded = false
-        }
-        pointerDidFocus()
-    }
-
-    func click(topBar item: TopBarItem) {
-        pointerAnchor = .zero
-        hover(topBar: item)
-        focus = .topBar(item)
-        handle(.select)
-    }
-
-
-    /// Moving the pointer over a card focuses it, exactly as arrowing onto it
-    /// would. Focus stays the single source of truth: the mouse is another way
-    /// to move it, never a second selection model running alongside.
-    func hover(shelf: Int, index: Int) {
-        guard pointerHasMoved() else { return }
-        let target = BrowseFocus.card(shelf: shelf, index: index)
-        guard focus != target, video(shelf: shelf, index: index) != nil else { return }
-        withAnimation(Theme.stateChange) {
-            focus = target
-            isRailExpanded = false
-        }
-        pointerDidFocus()
-        prefetchFocusedVideo()
-    }
-
-    func hover(rail item: RailItem) {
-        guard pointerHasMoved() else { return }
-        let target = BrowseFocus.rail(item)
-        guard focus != target else { return }
-        withAnimation(Theme.stateChange) {
-            memory.remember(focus)
-            focus = target
-            isRailExpanded = true
-        }
-        pointerDidFocus()
-    }
-
-    /// A click focuses first and then activates, so clicking an unfocused card
-    /// cannot play a different video than the one under the pointer.
-    func click(shelf: Int, index: Int) {
-        pointerAnchor = .zero          // a click is deliberate; never suppress it
-        hover(shelf: shelf, index: index)
-        if let video = video(shelf: shelf, index: index) { present(video) }
-    }
+    // MARK: - Sign-out confirmation
+    //
+    // No pointer path anywhere in this model: the app is driven by keys and a
+    // gamepad only. Hover/click focus was tried and removed — see PR #3.
 
     func confirmSignOut() {
         withAnimation(Theme.stateChange) { isConfirmingSignOut = false }
@@ -815,17 +703,6 @@ final class AppModel {
 
     func cancelSignOut() {
         withAnimation(Theme.stateChange) { isConfirmingSignOut = false }
-    }
-
-    func click(rail item: RailItem) {
-        pointerAnchor = .zero
-        hover(rail: item)
-        if case .account = item {
-            if auth.isSignedIn { withAnimation(Theme.stateChange) { isConfirmingSignOut = true } }
-            else { isSigningIn = true }
-            return
-        }
-        open(item)
     }
 
     /// Re-clamps focus after the feed changes shape underneath it. Shelves load

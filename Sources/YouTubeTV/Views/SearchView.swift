@@ -5,10 +5,6 @@ import YouTubeCore
 struct SearchView: View {
 
     @Bindable var model: SearchModel
-    /// The keyboard and results are navigable with the pointer as well as the
-    /// d-pad — same shape as `GuideRail`'s pair.
-    var onHover: (SearchModel.Focus) -> Void = { _ in }
-    var onSelect: (SearchModel.Focus) -> Void = { _ in }
     @Environment(\.viewportSize) private var viewport
 
     private func rem(_ n: CGFloat) -> CGFloat { Theme.Metrics.rem(n, viewport) }
@@ -88,9 +84,6 @@ struct SearchView: View {
                     .fill(isFocused ? Theme.focusRing : Theme.control.opacity(0.5))
             }
             .animation(Theme.stateChange, value: isFocused)
-            .contentShape(.rect)
-            .onHover { inside in if inside { onHover(.key(index)) } }
-            .onTapGesture { onSelect(.key(index)) }
     }
 
     // MARK: - Results
@@ -113,8 +106,6 @@ struct SearchView: View {
                     VideoCard(video: video,
                               isFocused: model.focus == .result(index),
                               isHero: false)
-                        .onHover { inside in if inside { onHover(.result(index)) } }
-                        .onTapGesture { onSelect(.result(index)) }
                 }
             }
             .offset(x: -CGFloat(parked) * step)

@@ -15,7 +15,6 @@ struct ChannelHeader: View {
 
     let channel: Channel
     let isFocused: Bool
-    var onSelect: () -> Void = {}
 
     @Environment(\.viewportSize) private var viewport
 
@@ -71,8 +70,6 @@ struct ChannelHeader: View {
                         .padding(-Theme.Metrics.focusRingInset(viewport))
                 }
             }
-            .contentShape(Capsule())
-            .onTapGesture(perform: onSelect)
             .animation(Theme.travel, value: isFocused)
             .animation(Theme.stateChange, value: channel.isSubscribed)
     }

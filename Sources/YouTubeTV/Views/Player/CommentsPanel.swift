@@ -52,7 +52,6 @@ struct CommentsPanel: View {
             VStack(alignment: .leading, spacing: rem(1.25)) {
                 ForEach(Array(model.comments.enumerated()), id: \.element.id) { index, comment in
                     row(comment, isFocused: model.commentIndex == index)
-                        .onHover { if $0 { model.hoverComment(index) } }
                 }
             }
             // Keeps the focused comment in view by translating the column, the

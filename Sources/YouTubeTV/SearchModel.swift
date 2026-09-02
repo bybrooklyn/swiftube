@@ -90,16 +90,6 @@ final class SearchModel {
         }
     }
 
-    /// Puts focus on a key or result directly — the pointer's way in. Ignores
-    /// targets that do not exist, so a stale hover cannot focus nothing.
-    func focus(on target: Focus) {
-        switch target {
-        case let .key(index):    guard Self.keys.indices.contains(index) else { return }
-        case let .result(index): guard results.indices.contains(index) else { return }
-        }
-        focus = target
-    }
-
     nonisolated static func isLastColumn(_ index: Int) -> Bool {
         guard index < keys.count, !keys[index].isWide else { return true }
         return index % columns == columns - 1

@@ -143,10 +143,6 @@ private struct ShelfRow: View {
                         VideoCard(video: video,
                                   isFocused: model.isFocused(shelf: shelfIndex, index: index),
                                   isHero: isHero)
-                            .onHover { inside in
-                                if inside { model.hover(shelf: shelfIndex, index: index) }
-                            }
-                            .onTapGesture { model.click(shelf: shelfIndex, index: index) }
                     }
                 }
                 .offset(x: -CGFloat(parked) * step)

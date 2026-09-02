@@ -31,8 +31,6 @@ struct UpNextRail: View {
                         UpNextCard(video: video,
                                    isFocused: model.upNextIndex == index,
                                    width: cardWidth)
-                            .onHover { if $0 { model.hoverUpNext(index) } }
-                            .onTapGesture { model.clickUpNext(index) }
                     }
                 }
                 // Same parking rule as a shelf: the focused card sits at the

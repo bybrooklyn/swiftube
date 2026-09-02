@@ -410,27 +410,8 @@ final class PlayerModel {
         }
     }
 
-    func hoverComment(_ index: Int) {
-        guard comments.indices.contains(index), commentIndex != index else { return }
-        withAnimation(Theme.stateChange) { commentIndex = index }
-    }
-
     private func closeUpNext() {
         withAnimation(Theme.stateChange) { upNextIndex = nil }
-    }
-
-    /// Pointer support, matching the browse surface: hover focuses, click plays.
-    func hoverUpNext(_ index: Int) {
-        guard upNext.indices.contains(index), upNextIndex != index else { return }
-        withAnimation(Theme.stateChange) { upNextIndex = index }
-        showControls()
-    }
-
-    func clickUpNext(_ index: Int) {
-        guard upNext.indices.contains(index) else { return }
-        let video = upNext[index]
-        closeUpNext()
-        play(video)
     }
 
     func openMenu() {
