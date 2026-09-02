@@ -484,14 +484,24 @@ final class AppModel {
     @ObservationIgnored private var settingsWasSignedIn = false
 
     func openMusic() {
-        music = MusicModel(api: api, settingsStore: settingsStore)
-        music?.start()
+        if music == nil {
+            let m = MusicModel(api: api, settingsStore: settingsStore)
+            m.playback.updateAuthToken(auth.accessToken)
+            m.playback.updateSAPISID(auth.sapisid)
+            m.applyUpdatedSettings(playerSettings)
+            music = m
+            m.start()
+        }
     }
 
+    /// Leaving the tab, not stopping the music — the model (and whatever is
+    /// playing) stays alive, the same way switching from the player to browse
+    /// doesn't stop a video. `sectionHistory` restores exactly what `open`
+    /// itself would if you'd navigated there normally, so the guide highlight
+    /// and the visible feed agree again (they used to disagree: `open` never
+    /// touched either while Music was showing modally on top).
     private func closeMusic() {
-        music?.stop()
-        music = nil
-        focus = .rail(.music)
+        open(sectionHistory.popLast() ?? .home, recordingHistory: false)
         isRailExpanded = true
     }
 
@@ -511,6 +521,7 @@ final class AppModel {
         // Settings changes affect playback, so hand the new values to the
         // player the next time one is created — and to any that is live now.
         player?.playback.updateSettings(playerSettings)
+        music?.applyUpdatedSettings(playerSettings)
         // Settings' account row calls auth.signOut() directly, so the four
         // token holders below never heard about it and kept using a dead token
         // until the next launch. The guide's own sign-out path already fans out.
@@ -842,6 +853,8 @@ final class AppModel {
 
         player?.playback.updateAuthToken(token)
         player?.playback.updateSAPISID(sapisid)
+        music?.playback.updateAuthToken(token)
+        music?.playback.updateSAPISID(sapisid)
     }
 
     // MARK: - Continue watching
@@ -889,6 +902,7 @@ final class AppModel {
         guard expensive != isExpensivePath else { return }
         isExpensivePath = expensive
         player?.playback.updateSettings(playerSettings)
+        music?.applyUpdatedSettings(playerSettings)
     }
 
     /// The profile in force now: the chosen one, or Data saver while the
@@ -941,6 +955,7 @@ final class AppModel {
 
     /// The thumbnail under focus, for the ambient backdrop.
     var focusedThumbnailURL: URL? {
+        if selectedRailItem == .music, let music { return music.focusedArtworkURL }
         guard case let .card(shelf, index) = focus else { return nil }
         return video(shelf: shelf, index: index)?.thumbnailURL
     }
@@ -1010,7 +1025,9 @@ final class AppModel {
             return
         }
 
-        if let music {
+        // `music` alone is not "Music is showing" — it now outlives the tab
+        // so playback keeps running after Left/guide-away (see closeMusic).
+        if selectedRailItem == .music, let music {
             music.handle(intent)
             // Left from the leftmost column, or Back at the tab's root: the
             // guide takes over, the same gesture that leaves a browse shelf.

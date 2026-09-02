@@ -31,6 +31,14 @@ public final class WatchtimeTracker {
 
     private let api: InnerTubeAPI
 
+    /// False for the Music tab's tracker. Music still reports real watchtime
+    /// to the account (`reportWatchtime`/`reportPlaybackStarted` below run
+    /// either way — YouTube Music genuinely does record plays), but a locally
+    /// saved position feeds straight into `AppModel.loadContinueWatching`,
+    /// which cross-references it against server history and would otherwise
+    /// list half-played songs as videos on Home.
+    private let savesLocalPosition: Bool
+
     private var videoId: String = ""
     private var cpn: String = ""
     private var trackingURLs: PlaybackTrackingURLs?
@@ -40,8 +48,9 @@ public final class WatchtimeTracker {
 
     // MARK: - Init
 
-    public init(api: InnerTubeAPI) {
+    public init(api: InnerTubeAPI, savesLocalPosition: Bool = true) {
         self.api = api
+        self.savesLocalPosition = savesLocalPosition
     }
 
     // MARK: - Transition (load → new video)
@@ -69,6 +78,7 @@ public final class WatchtimeTracker {
         let oldURLs       = trackingURLs
         let oldSegStart   = segmentStart
         let api           = self.api
+        let savesLocalPosition = self.savesLocalPosition
 
         // Reset to new session synchronously — no race with the returned closure.
         videoId      = newVideoId
@@ -90,7 +100,9 @@ public final class WatchtimeTracker {
             // prevent cmt from being recorded and leave the watch-progress bar stale.
             let segStart = oldSegStart ?? 0
             trackerLog.notice("transition flush: videoId=\(oldVideoId, privacy: .public) st=\(Int(segStart))s et=\(Int(flushPosition))s")
-            await VideoStateStore.shared.save(videoId: oldVideoId, position: flushPosition, duration: flushDuration)
+            if savesLocalPosition {
+                await VideoStateStore.shared.save(videoId: oldVideoId, position: flushPosition, duration: flushDuration)
+            }
             await api.reportWatchtime(videoId: oldVideoId, cpn: oldCPN, trackingURLs: oldURLs,
                                       segmentStart: segStart, segmentEnd: flushPosition)
         }
@@ -131,7 +143,9 @@ public final class WatchtimeTracker {
 
         let segStart = segmentStart ?? 0
         trackerLog.notice("checkpoint: videoId=\(vid, privacy: .public) st=\(Int(segStart))s et=\(Int(position))s dur=\(Int(duration))s")
-        await VideoStateStore.shared.save(videoId: vid, position: position, duration: duration)
+        if savesLocalPosition {
+            await VideoStateStore.shared.save(videoId: vid, position: position, duration: duration)
+        }
         await api.reportWatchtime(videoId: vid, cpn: localCPN, trackingURLs: localURLs,
                                    segmentStart: segStart, segmentEnd: position)
         segmentStart = position

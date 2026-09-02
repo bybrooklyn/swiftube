@@ -466,10 +466,13 @@ public final class PlaybackViewModel {
         api: InnerTubeAPI = InnerTubeAPI(),
         sponsorBlock: SponsorBlockService = SponsorBlockService(),
         deArrow: DeArrowService = DeArrowService(),
-        settings: AppSettings = AppSettings()
+        settings: AppSettings = AppSettings(),
+        // PORT NOTE (music queue, plan 9.2): false for the Music tab's own
+        // instance — see WatchtimeTracker.savesLocalPosition.
+        tracksLocalWatchPosition: Bool = true
     ) {
         self.api = api
-        self.tracker = WatchtimeTracker(api: api)
+        self.tracker = WatchtimeTracker(api: api, savesLocalPosition: tracksLocalWatchPosition)
         self.sponsorBlock = sponsorBlock
         self.deArrow = deArrow
         self.settings = settings

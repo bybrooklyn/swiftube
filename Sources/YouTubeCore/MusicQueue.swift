@@ -108,7 +108,7 @@ public struct MusicQueue: Sendable, Equatable {
         guard !order.isEmpty else { return nil }
         if cursor + 1 < order.count {
             cursor += 1
-        } else if repeatMode != .off {
+        } else if repeatMode == .all {
             cursor = 0
             // A second pass through a shuffled queue gets a fresh permutation,
             // otherwise "shuffle" is one fixed order repeated forever.
@@ -214,9 +214,11 @@ public struct MusicQueue: Sendable, Equatable {
     /// Inserts directly after the current track ("Play next").
     public mutating func playNext(_ track: MusicTrack) {
         guard !tracks.contains(where: { $0.id == track.id }) else {
-            // Already queued: move it instead of duplicating.
+            // Already queued: move it instead of duplicating. Already sitting
+            // right after the cursor — nothing to do, and falling through
+            // would walk the cursor itself backward off the current track.
             if let trackIndex = tracks.firstIndex(where: { $0.id == track.id }),
-               let position = order.firstIndex(of: trackIndex) {
+               let position = order.firstIndex(of: trackIndex), position != cursor {
                 order.remove(at: position)
                 let insertAt = min(cursor + (position <= cursor ? 0 : 1), order.count)
                 order.insert(trackIndex, at: insertAt)
@@ -230,9 +232,21 @@ public struct MusicQueue: Sendable, Equatable {
 
     /// Removes a track from the play order. Removing the current track advances
     /// onto the next one, which is what every queue UI does.
+    ///
+    /// Removes from `tracks` too, not just `order` — leaving it behind made
+    /// `count`/`isEmpty` lie (they read `tracks.count`), let `setShuffled(false)`
+    /// resurrect the removed track (it rebuilds `order` from `tracks.indices`),
+    /// and made `append`'s id-dedup refuse to re-add it.
     public mutating func remove(atPlayPosition position: Int) {
         guard order.indices.contains(position) else { return }
+        let trackIndex = order[position]
+        guard tracks.indices.contains(trackIndex) else { return }
+
+        tracks.remove(at: trackIndex)
         order.remove(at: position)
+        // Every position after the removed track just shifted down by one.
+        order = order.map { $0 > trackIndex ? $0 - 1 : $0 }
+
         if position < cursor {
             cursor -= 1
         } else if position == cursor {

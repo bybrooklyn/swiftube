@@ -15,8 +15,6 @@ struct MusicView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Theme.canvas.ignoresSafeArea()
-
             VStack(alignment: .leading, spacing: 0) {
                 if let header = model.header {
                     MusicPageHeader(header: header)
@@ -28,22 +26,26 @@ struct MusicView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             if model.isLoading && model.rows.isEmpty {
-                ProgressView()
-                    .controlSize(.large)
+                LoadingIndicator()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let message = model.message {
                 SurfaceMessage(title: "Music", detail: message, symbol: "music.note")
             }
 
-            if model.session.currentTrack != nil, !model.isNowPlayingOpen {
-                MiniPlayerBar(model: model)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .transition(.move(edge: .bottom))
+            // Hosted outside the conditional, like the app's other glass panels,
+            // so the bar materialises rather than cutting (see GlassHost).
+            GlassHost {
+                if model.session.currentTrack != nil, !model.isNowPlayingOpen {
+                    MiniPlayerBar(model: model)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .transition(Theme.panelTransition)
+                }
             }
+            .animation(Theme.travel, value: model.session.currentTrack?.id)
 
             if model.isNowPlayingOpen {
                 NowPlayingView(model: model)
-                    .transition(.opacity)
+                    .transition(Theme.panelTransition)
                     .zIndex(2)
             }
         }

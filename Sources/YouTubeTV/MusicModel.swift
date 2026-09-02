@@ -110,6 +110,23 @@ final class MusicModel {
     private(set) var message: String?
 
     private(set) var focus = MusicFocus()
+
+    /// Art of whatever is under focus, for the root ambient backdrop — same
+    /// idea as `AppModel.focusedThumbnailURL`, just over rows instead of shelves.
+    /// Falls back to the page header's art (a detail page's own square) and
+    /// then to nothing, letting the backdrop settle to its neutral wash.
+    var focusedArtworkURL: URL? {
+        guard rows.indices.contains(focus.row) else { return header?.artworkURL }
+        switch rows[focus.row].content {
+        case let .tiles(items) where items.indices.contains(focus.column):
+            return items[focus.column].thumbnailURL
+        case let .tracks(tracks) where tracks.indices.contains(focus.column):
+            return tracks[focus.column].thumbnailURL
+        default:
+            return header?.artworkURL
+        }
+    }
+
     var layout: MusicLayout {
         // Track lists are stacked, so up/down walk inside them; carousels,
         // chips and action pills are strung out and answer to left/right.
@@ -138,9 +155,19 @@ final class MusicModel {
         self.settingsStore = settingsStore
         self.session = MusicSession(api: api)
         self.lyricsService = LyricsService(api: api)
-        self.playback = PlaybackViewModel(api: api)
+        self.playback = PlaybackViewModel(api: api, tracksLocalWatchPosition: false)
 
-        var settings = settingsStore.settings
+        applyUpdatedSettings(settingsStore.settings)
+        playback.onPlaybackEnded = { [weak self] in self?.trackDidFinish() }
+    }
+
+    /// Pushes settings into `playback`, same as `AppModel` does for the video
+    /// player — the bandwidth cap and focus-mode's autoplay override reach
+    /// Music through this instead of only applying at construction time.
+    /// Called from `AppModel` on sign-in/out, Settings closing, and a
+    /// network-path change; also from `init`.
+    func applyUpdatedSettings(_ settings: AppSettings) {
+        var settings = settings
         // The Music tab is audio: there is no video track worth fetching, and
         // the existing audio-only path already knows how to pick the stream and
         // fall back to android_vr when the first URL is refused.
@@ -149,7 +176,6 @@ final class MusicModel {
         // recommendations ladder.
         settings.autoplayEnabled = false
         playback.updateSettings(settings)
-        playback.onPlaybackEnded = { [weak self] in self?.trackDidFinish() }
     }
 
     /// The music queue is on unless the user opted out, in which case selecting

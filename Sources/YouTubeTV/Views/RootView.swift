@@ -28,8 +28,19 @@ struct RootView: View {
                             .padding(.bottom, Theme.Metrics.rem(1.25, geo.size))
                             .transition(.opacity)
                     }
-                    ShelfListView(model: model)
-                        .frame(maxHeight: .infinity, alignment: .top)
+                    // Music is a rail destination, not a modal — it stays inside
+                    // the content column so the guide and its push offset behave
+                    // exactly like every other tab. Keyed on `selectedRailItem`,
+                    // not `model.music != nil`: the model outlives the tab once
+                    // created (closeMusic leaves it running so playback doesn't
+                    // stop), so its own nil-ness is no longer "is Music showing."
+                    if model.selectedRailItem == .music, let music = model.music {
+                        MusicView(model: music)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    } else {
+                        ShelfListView(model: model)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // The guide pushes the content column right rather than
@@ -62,11 +73,6 @@ struct RootView: View {
 
                 if let settings = model.settings {
                     SettingsView(model: settings, onBack: { model.closeSettings() })
-                        .zIndex(3)
-                }
-
-                if let music = model.music {
-                    MusicView(model: music)
                         .zIndex(3)
                 }
 
