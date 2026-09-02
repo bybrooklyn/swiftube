@@ -58,6 +58,10 @@ final class PlayerModel {
     private(set) var commentIndex: Int?
     var isCommentsOpen: Bool { commentIndex != nil }
 
+    /// Non-nil while a comment is being written. Lives inside the comments
+    /// panel and, like the menu, takes every press while it is up.
+    private(set) var composer: CommentComposer?
+
     /// Whether the account follows the channel of whatever is playing, and
     /// whether this video is in Watch Later. Both are optimistic: the button
     /// changes on press and is put back if the write fails.
@@ -216,13 +220,27 @@ final class PlayerModel {
             return
         }
 
+        if let composer {
+            switch intent {
+            case let .move(direction): composer.move(direction)
+            case .select:              if composer.select() { postComment(composer.text) }
+            case .back, .menu:         closeComposer()
+            case .playPause:           playback.togglePlayPause()
+            case let .seek(direction): seek(direction)
+            }
+            showControls()
+            return
+        }
+
         if let index = commentIndex {
             switch intent {
             case .move(.up):
                 if index > 0 { withAnimation(Theme.stateChange) { commentIndex = index - 1 } }
             case .move(.down):
                 if index + 1 < comments.count { withAnimation(Theme.stateChange) { commentIndex = index + 1 } }
-            case .move(.left), .move(.right), .select:
+            case .select:
+                openComposer()
+            case .move(.left), .move(.right):
                 break
             case .back, .menu:
                 closeComments()
@@ -325,8 +343,43 @@ final class PlayerModel {
         case .comments:  openComments()
         case .subscribe: toggleSubscribe()
         case .save:      toggleSaved()
+        case .addToPlaylist: openMenu(at: .playlist)
         case .description: openDescription()
         case .stats:       playback.toggleStatsForNerds()
+        }
+    }
+
+    // MARK: - Writing a comment
+
+    private func openComposer() {
+        withAnimation(Theme.stateChange) { composer = CommentComposer() }
+        cancelAutoHide()
+    }
+
+    func closeComposer() {
+        withAnimation(Theme.stateChange) { composer = nil }
+        showControls()
+    }
+
+    /// Posts, then shows the new comment at the top without a refetch — the
+    /// continuation would not include it for a while anyway.
+    private func postComment(_ text: String) {
+        guard let videoId = playback.currentVideo?.id, let composer else { return }
+        composer.beginPosting()
+        Task { [api] in
+            do {
+                try await api.postComment(videoId: videoId, text: text)
+                guard self.playback.currentVideo?.id == videoId else { return }
+                self.comments.insert(Comment(id: "local-\(UUID().uuidString)", author: "You",
+                                             authorAvatarURL: nil, text: text, likeCount: "",
+                                             publishedTime: "Just now", isLiked: false), at: 0)
+                self.commentIndex = 0
+                self.closeComposer()
+            } catch APIError.notAuthenticated {
+                composer.fail("Sign in to comment.")
+            } catch {
+                composer.fail("Could not post this comment.")
+            }
         }
     }
 
@@ -356,7 +409,7 @@ final class PlayerModel {
     }
 
     func closeComments() {
-        withAnimation(Theme.stateChange) { commentIndex = nil }
+        withAnimation(Theme.stateChange) { commentIndex = nil; composer = nil }
         focusedControl = .comments
         showControls()
     }
@@ -416,15 +469,21 @@ final class PlayerModel {
         play(video)
     }
 
-    func openMenu() {
-        menu = PlayerMenuModel(playback: playback)
+    /// Which transport button opened the menu, so closing it lands back there.
+    @ObservationIgnored private var menuOrigin: PlayerControl = .settings
+
+    func openMenu(at category: PlayerMenuModel.Category? = nil) {
+        menuOrigin = category == .playlist ? .addToPlaylist : .settings
+        menu = PlayerMenuModel(playback: playback, api: api, opening: category,
+                               isInWatchLater: { [weak self] in self?.isSaved ?? false },
+                               toggleWatchLater: { [weak self] in self?.toggleSaved() })
         // The menu must not vanish under the auto-hide timer while it is open.
         cancelAutoHide()
     }
 
     func closeMenu() {
         menu = nil
-        focusedControl = .settings
+        focusedControl = menuOrigin
         showControls()
     }
 
@@ -441,7 +500,8 @@ final class PlayerModel {
         // Up-next and comments live *inside* the overlay this timer hides, so
         // letting it fire while one was open left the selection invisible but still
         // live — Select then played a video the user could not see.
-        guard menu == nil, upNextIndex == nil, commentIndex == nil, descriptionScroll == nil else { return }
+        guard menu == nil, upNextIndex == nil, commentIndex == nil, composer == nil,
+              descriptionScroll == nil else { return }
         hideTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: self.autoHideDelay)
@@ -454,7 +514,7 @@ final class PlayerModel {
                 try? await Task.sleep(for: .milliseconds(400))
             }
             guard !Task.isCancelled, self.menu == nil, self.upNextIndex == nil,
-                  self.commentIndex == nil, self.descriptionScroll == nil
+                  self.commentIndex == nil, self.composer == nil, self.descriptionScroll == nil
             else { return }
             withAnimation(Theme.travel) { self.areControlsVisible = false }
         }

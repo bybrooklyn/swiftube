@@ -162,7 +162,7 @@ struct GuideRail: View {
             return items.first { if case .channel = $0 { return true }; return false } == item
         case .subscriptions:
             return !items.contains { if case .channel = $0 { return true }; return false }
-        case .music:
+        case .explore:
             return true
         default:
             return false
@@ -198,6 +198,7 @@ struct GuideRail: View {
         case .shorts:        .shorts
         case .subscriptions: .subscriptions
         case .library:       .library
+        case .explore:       .explore
         case .music:         .music
         case .gaming:        .gaming
         case .live:          .live
@@ -205,7 +206,7 @@ struct GuideRail: View {
         case .podcasts:      .podcasts
         case .sports:        .sports
         case .settings:      .settings
-        case .account, .channel: nil
+        case .account, .channel, .playlist: nil
         }
     }
 
@@ -218,6 +219,8 @@ struct GuideRail: View {
         case let .channel(id): channels.first { $0.id == id }?.title ?? "Channel"
         case .subscriptions: "Subscriptions"
         case .library:       "Library"
+        case .explore:       "Explore"
+        case let .playlist(_, title): title
         case .music:         "Music"
         case .gaming:        "Gaming"
         case .live:          "Live"

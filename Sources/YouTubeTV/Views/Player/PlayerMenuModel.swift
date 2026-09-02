@@ -15,7 +15,7 @@ import YouTubeMedia
 final class PlayerMenuModel {
 
     enum Category: String, CaseIterable, Identifiable {
-        case quality, captions, speed, audio
+        case quality, captions, speed, audio, playlist
         var id: String { rawValue }
 
         var title: String {
@@ -24,6 +24,7 @@ final class PlayerMenuModel {
             case .captions: "Subtitles"
             case .speed:    "Speed"
             case .audio:    "Audio"
+            case .playlist: "Save to"
             }
         }
 
@@ -33,6 +34,7 @@ final class PlayerMenuModel {
             case .captions: "captions.bubble"
             case .speed:    "gauge.with.needle"
             case .audio:    "waveform"
+            case .playlist: "text.badge.plus"
             }
         }
     }
@@ -49,16 +51,41 @@ final class PlayerMenuModel {
     enum Column { case categories, options }
 
     private let playback: PlaybackViewModel
+    @ObservationIgnored private let api: InnerTubeAPI
+    /// Watch Later is owned by `PlayerModel` (its button shows the state), so
+    /// the picker reads and flips it through these rather than duplicating it.
+    @ObservationIgnored private let isInWatchLater: () -> Bool
+    @ObservationIgnored private let toggleWatchLater: () -> Void
+
+    /// The account's playlists, fetched once per menu. Empty signed out.
+    private(set) var playlists: [PlaylistInfo] = []
+    /// Playlists this video was added to from this menu — the only membership
+    /// we know without a per-playlist fetch.
+    // ponytail: membership is session-local; a real "already in" needs the playlist contents.
+    private(set) var added: Set<String> = []
 
     private(set) var category: Category = .quality
     private(set) var column: Column = .categories
     private(set) var optionIndex = 0
 
-    init(playback: PlaybackViewModel) {
+    init(playback: PlaybackViewModel,
+         api: InnerTubeAPI,
+         opening: Category? = nil,
+         isInWatchLater: @escaping () -> Bool = { false },
+         toggleWatchLater: @escaping () -> Void = {}) {
         self.playback = playback
-        // Open on whichever category has something to offer.
-        if playback.availableFormats.isEmpty {
+        self.api = api
+        self.isInWatchLater = isInWatchLater
+        self.toggleWatchLater = toggleWatchLater
+        if let opening {
+            category = opening
+        } else if playback.availableFormats.isEmpty {
+            // Open on whichever category has something to offer.
             category = playback.availableCaptions.isEmpty ? .speed : .captions
+        }
+        Task { [weak self, api] in
+            let fetched = (try? await api.fetchUserPlaylists()) ?? []
+            self?.playlists = fetched.filter { $0.id != "WL" }   // Watch Later has its own row
         }
     }
 
@@ -112,6 +139,25 @@ final class PlayerMenuModel {
                     playback.selectAudioTrack(track)
                 }
             }
+
+        case .playlist:
+            let watchLater = Option(id: "WL", title: "Watch Later",
+                                    isSelected: isInWatchLater(), apply: toggleWatchLater)
+            return [watchLater] + playlists.map { playlist in
+                Option(id: playlist.id, title: playlist.title,
+                       isSelected: added.contains(playlist.id)) { [weak self] in
+                    self?.add(to: playlist.id)
+                }
+            }
+        }
+    }
+
+    private func add(to playlistId: String) {
+        guard let videoId = playback.currentVideo?.id, !added.contains(playlistId) else { return }
+        added.insert(playlistId)
+        Task { [api] in
+            do { try await api.addToPlaylist(videoId: videoId, playlistId: playlistId) }
+            catch { self.added.remove(playlistId) }
         }
     }
 
@@ -123,6 +169,10 @@ final class PlayerMenuModel {
         case .captions: playback.selectedCaption?.name ?? "Off"
         case .speed:    String(format: "%gx", playback.settings.playbackSpeed)
         case .audio:    playback.selectedAudioTrack?.name ?? "Default"
+        case .playlist:
+            if isInWatchLater() { "Watch Later" }
+            else if added.isEmpty { "" }
+            else { "\(added.count) added" }
         }
     }
 

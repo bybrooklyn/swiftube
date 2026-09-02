@@ -29,7 +29,9 @@ struct CommentsPanel: View {
                     .foregroundStyle(Theme.textPrimary)
             }
 
-            if model.isLoadingComments {
+            if let composer = model.composer {
+                composerView(composer)
+            } else if model.isLoadingComments {
                 LoadingIndicator()
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, rem(2))
@@ -39,6 +41,9 @@ struct CommentsPanel: View {
                     .foregroundStyle(Theme.textSecondary)
             } else {
                 list
+                Text("Select to write a comment")
+                    .font(.system(size: Theme.Metrics.cardMetaSize(viewport) * 0.9))
+                    .foregroundStyle(Theme.textTertiary)
             }
 
             Spacer(minLength: 0)
@@ -66,6 +71,30 @@ struct CommentsPanel: View {
             .frame(width: geo.size.width, alignment: .topLeading)
         }
         .clipped()
+    }
+
+    /// The field and keyboard, in place of the list while writing.
+    private func composerView(_ composer: CommentComposer) -> some View {
+        VStack(alignment: .leading, spacing: rem(0.8)) {
+            Text(composer.text.isEmpty ? "Write a comment" : composer.text)
+                .font(.system(size: rem(1.1), weight: .medium))
+                .foregroundStyle(composer.text.isEmpty ? Theme.textTertiary : Theme.textPrimary)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, rem(0.8))
+                .padding(.vertical, rem(0.5))
+                .background(Theme.control, in: .rect(cornerRadius: Theme.Metrics.plateCorner(viewport)))
+
+            OnScreenKeyboard(keys: CommentComposer.keys, focusedIndex: composer.keyIndex)
+
+            if composer.isPosting {
+                LoadingIndicator(scale: 0.6)
+            } else if let failure = composer.failure {
+                Text(failure)
+                    .font(.system(size: Theme.Metrics.cardMetaSize(viewport) * 0.9))
+                    .foregroundStyle(Theme.brand)
+            }
+        }
     }
 
     private func row(_ comment: Comment, isFocused: Bool) -> some View {

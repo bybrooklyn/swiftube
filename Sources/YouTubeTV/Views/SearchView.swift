@@ -30,35 +30,15 @@ struct SearchView: View {
     private var keyboard: some View {
         VStack(alignment: .leading, spacing: rem(1)) {
             queryField
-
-            let keys = SearchModel.keys
-            let characterCount = keys.firstIndex { $0.isWide } ?? keys.count
-            let rows = Int(ceil(Double(characterCount) / Double(SearchModel.columns)))
-
-            VStack(spacing: rem(0.4)) {
-                ForEach(0..<rows, id: \.self) { row in
-                    HStack(spacing: rem(0.4)) {
-                        ForEach(0..<SearchModel.columns, id: \.self) { column in
-                            let index = row * SearchModel.columns + column
-                            if index < characterCount {
-                                key(at: index)
-                            } else {
-                                Color.clear.frame(width: keySize, height: keySize)
-                            }
-                        }
-                    }
-                }
-                HStack(spacing: rem(0.4)) {
-                    ForEach(characterCount..<keys.count, id: \.self) { index in
-                        key(at: index)
-                    }
-                }
-            }
+            OnScreenKeyboard(keys: SearchModel.keys, focusedIndex: focusedKey)
         }
-        .frame(width: keySize * CGFloat(SearchModel.columns) + rem(0.4) * CGFloat(SearchModel.columns - 1))
+        .frame(width: OnScreenKeyboard.width(viewport))
     }
 
-    private var keySize: CGFloat { rem(2.6) }
+    private var focusedKey: Int? {
+        if case let .key(index) = model.focus { return index }
+        return nil
+    }
 
     private var queryField: some View {
         Text(model.query.isEmpty ? "Search" : model.query)
@@ -69,25 +49,6 @@ struct SearchView: View {
             .padding(.horizontal, rem(1))
             .frame(height: Theme.Metrics.searchPillHeight(viewport))
             .background(Theme.control, in: .capsule)
-    }
-
-    @ViewBuilder
-    private func key(at index: Int) -> some View {
-        let entry = SearchModel.keys[index]
-        let isFocused = model.focus == .key(index)
-        let wide = entry.isWide
-
-        Text(entry.label)
-            .font(.system(size: wide ? rem(0.85) : rem(1.2),
-                          weight: isFocused ? .semibold : .regular))
-            .foregroundStyle(isFocused ? Theme.canvas : Theme.textPrimary)
-            .frame(width: wide ? nil : keySize, height: keySize)
-            .frame(maxWidth: wide ? .infinity : nil)
-            .background {
-                RoundedRectangle(cornerRadius: rem(0.5), style: .continuous)
-                    .fill(isFocused ? Theme.focusRing : Theme.control.opacity(0.5))
-            }
-            .animation(Theme.stateChange, value: isFocused)
     }
 
     // MARK: - Results

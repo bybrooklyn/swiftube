@@ -38,6 +38,19 @@ public struct Comment: Sendable, Identifiable {
     public let likeCount: String
     public let publishedTime: String
     public let isLiked: Bool
+
+    // Public so the macOS player can show a comment it just posted without a
+    // refetch. Not upstream.
+    public init(id: String, author: String, authorAvatarURL: URL?, text: String,
+                likeCount: String, publishedTime: String, isLiked: Bool) {
+        self.id = id
+        self.author = author
+        self.authorAvatarURL = authorAvatarURL
+        self.text = text
+        self.likeCount = likeCount
+        self.publishedTime = publishedTime
+        self.isLiked = isLiked
+    }
 }
 
 // MARK: - EndCard

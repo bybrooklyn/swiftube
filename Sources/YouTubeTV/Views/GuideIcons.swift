@@ -17,7 +17,7 @@ import SwiftUI
 /// dozen subpaths, and as views that is a dozen nodes each with its own layout
 /// and layer, times fourteen rows.
 enum GuideGlyph {
-    case search, home, shorts, subscriptions, library, music
+    case search, home, shorts, subscriptions, library, explore, music
     case gaming, live, news, podcasts, sports, settings
 }
 
@@ -183,6 +183,18 @@ struct GuideIcon: View {
                 context.stroke(dpad, with: ink, style: thinStroke)
                 for rect in buttons { context.fill(Path(ellipseIn: rect), with: ink) }
             }
+
+        case .explore:
+            // A compass: ring with a two-tone needle. The needle is the detail
+            // knocked out of the filled ring when the section is current.
+            let ring = Path(ellipseIn: CGRect(x: 2.8, y: 2.8, width: 18.4, height: 18.4))
+            var needle = Path()
+            needle.move(to: CGPoint(x: 12, y: 6.2))
+            needle.addLine(to: CGPoint(x: 14.4, y: 12))
+            needle.addLine(to: CGPoint(x: 12, y: 17.8))
+            needle.addLine(to: CGPoint(x: 9.6, y: 12))
+            needle.closeSubpath()
+            body(ring, details: [needle])
 
         case .live:
             context.fill(Path(ellipseIn: CGRect(x: 9.9, y: 9.9, width: 4.2, height: 4.2)), with: ink)

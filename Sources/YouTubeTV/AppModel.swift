@@ -158,12 +158,14 @@ final class AppModel {
         // Capped: the guide is a menu, not the subscription manager.
         items += guideChannels.prefix(5).map { .channel($0.id) }
         items += [.subscriptions, .library,
-                  .music, .gaming, .live, .news, .podcasts, .sports,
+                  .explore, .music, .gaming, .live, .news, .podcasts, .sports,
                   .settings]
         return items
     }
 
-    var isLoading: Bool { browse.isLoading && browse.videoGroups.isEmpty && channelFeed == nil }
+    var isLoading: Bool {
+        browse.isLoading && browse.videoGroups.isEmpty && channelFeed == nil && customShelves.isEmpty
+    }
 
     /// Non-nil when the current surface has nothing to show, and why.
     ///
@@ -325,6 +327,24 @@ final class AppModel {
             return
         }
 
+        // Explore is every category at once, as rows.
+        if item == .explore {
+            selectedRailItem = item
+            memory.railItem = item
+            isRailExpanded = false
+            Task { await loadExplore() }
+            return
+        }
+
+        // A playlist is a surface of its own, reached from a tile rather
+        // than the guide — so the guide position is left where it was.
+        if case let .playlist(id, title) = item {
+            selectedRailItem = item
+            isRailExpanded = false
+            Task { await loadPlaylist(id, title: title) }
+            return
+        }
+
         // Bail *before* mutating anything. Search and Podcasts have no section
         // to load yet; moving the selection highlight and clearing the channel
         // feed for them silently reverted the visible feed to Home while
@@ -442,19 +462,159 @@ final class AppModel {
     /// search-backed categories have no single browse section behind them.
     private var customShelves: [Shelf] = []
 
+    /// A channel page: the header, then the channel's tabs as rows.
+    ///
+    /// Videos, Shorts, Playlists and Community are fetched together once the
+    /// header has resolved the canonical id; About is the description in the
+    /// header. Rows rather than tabs, because on a d-pad a row of rows is one
+    /// gesture away from everything, and a tab strip is a second focus model.
+    /// An empty tab is simply omitted.
     private func loadChannel(_ channelId: String) async {
-        guard let (channel, group) = try? await api.fetchChannel(channelId: channelId) else { return }
+        guard let (channel, featured) = try? await api.fetchChannel(channelId: channelId) else { return }
         channelHeader = channel
+        channelFeed = nil
         memory = BrowseNavigator.ColumnMemory()
         memory.railItem = .channel(channelId)
-        channelFeed = Shelf(id: "channel-\(channelId)",
-                            title: channel.title,
-                            videos: group.videos)
+        // Whatever the channel's landing tab showed, until the tabs arrive.
+        customShelves = [Shelf(id: "channel-\(channelId)", title: channel.title, videos: featured.videos)]
         focus = .card(shelf: 0, index: 0)
         // (A second `memory = ColumnMemory()` used to sit here and undo the
         // `memory.railItem` set above, so Left from a channel's first card opened
         // the guide on Home instead of on the channel being viewed.)
         isRailExpanded = false
+
+        let id = channel.id
+        async let videos = try? api.fetchChannelVideos(channelId: id)
+        async let shorts = try? api.fetchChannelShorts(channelId: id)
+        async let playlists = try? api.fetchChannelPlaylists(channelId: id)
+        async let community = try? api.fetchChannelCommunity(channelId: id)
+        let tabs: [(String, [Video])] = [
+            ("Videos", await videos?.videos ?? []),
+            ("Shorts", await shorts?.videos ?? []),
+            ("Playlists", (await playlists ?? []).map(Self.tile)),
+            ("Community", await community?.videos ?? []),
+        ]
+        // The user may have moved on while the tabs were loading.
+        guard channelHeader?.id == id else { return }
+        let shelves = tabs.filter { !$0.1.isEmpty }.map { title, videos in
+            Shelf(id: "channel-\(id)-\(title)", title: title, videos: videos)
+        }
+        if !shelves.isEmpty { customShelves = shelves }
+    }
+
+    /// A playlist drawn as a card: the tile's id *is* the playlist id, which
+    /// is how `activate` tells it from a video.
+    private static func tile(_ playlist: PlaylistInfo) -> Video {
+        Video(id: playlist.id,
+              title: playlist.title,
+              channelTitle: playlist.videoCount.map { "\($0) videos" } ?? "Playlist",
+              thumbnailURL: playlist.thumbnailURL,
+              playlistId: playlist.id)
+    }
+
+    /// Explore: Trending first, then every category, fetched together.
+    private func loadExplore() async {
+        customShelves = []
+        channelFeed = nil
+        channelHeader = nil
+        async let trending = try? api.fetchTrending()
+        async let music = try? api.fetchMusic()
+        async let gaming = try? api.fetchGaming()
+        async let live = try? api.fetchLive()
+        async let sports = try? api.fetchSports()
+        async let news = try? api.fetchNews()
+        let rows: [(String, VideoGroup?)] = [
+            ("Trending", await trending), ("Music", await music), ("Gaming", await gaming),
+            ("Live", await live), ("Sports", await sports), ("News", await news),
+        ]
+        guard selectedRailItem == .explore else { return }
+        customShelves = rows.compactMap { title, group in
+            guard let group, !group.videos.isEmpty else { return nil }
+            return Shelf(id: "explore-\(title)", title: title, videos: group.videos)
+        }
+        focus = .card(shelf: 0, index: 0)
+        memory = BrowseNavigator.ColumnMemory()
+        memory.railItem = .explore
+    }
+
+    /// One row: the playlist's videos, in order.
+    private func loadPlaylist(_ playlistId: String, title: String) async {
+        customShelves = []
+        channelFeed = nil
+        channelHeader = nil
+        guard let group = try? await api.fetchPlaylistVideos(playlistId: playlistId),
+              selectedRailItem == .playlist(id: playlistId, title: title) else { return }
+        customShelves = [Shelf(id: "playlist-\(playlistId)", title: title, videos: group.videos)]
+        focus = .card(shelf: 0, index: 0)
+        memory = BrowseNavigator.ColumnMemory()
+        memory.railItem = .library
+    }
+
+    /// Select on a card: a playlist tile opens the playlist, anything else plays.
+    private func activate(_ video: Video) {
+        if video.isPlaylistTile {
+            open(.playlist(id: video.id, title: video.title))
+        } else {
+            present(video)
+        }
+    }
+
+    // MARK: - Card actions
+
+    /// Non-nil while the card action menu is up. Modal over the browse surface.
+    private(set) var cardMenu: CardMenuModel?
+
+    /// The actions on a card. Feedback is the real YouTube dismissal — the
+    /// same call the shelf-level hide uses — not a local filter.
+    private func openCardMenu(for video: Video) {
+        var rows: [CardMenuModel.Row] = []
+        if !video.isPlaylistTile {
+            rows.append(.init(id: "not-interested", title: "Not interested", symbol: "eye.slash") { [weak self] in
+                self?.sendFeedback(for: video, token: video.notInterestedToken, iconType: "NOT_INTERESTED")
+            })
+            if video.channelId != nil {
+                rows.append(.init(id: "hide-channel", title: "Don't recommend channel", symbol: "person.slash") { [weak self] in
+                    self?.sendFeedback(for: video, token: video.hideChannelToken, iconType: "BLOCK_CHANNEL")
+                })
+            }
+        }
+        guard !rows.isEmpty else { return }
+        withAnimation(Theme.stateChange) { cardMenu = CardMenuModel(title: video.title, rows: rows) }
+    }
+
+    func closeCardMenu() {
+        withAnimation(Theme.stateChange) { cardMenu = nil }
+    }
+
+    /// Removes the video (or its channel) from every surface and tells
+    /// YouTube. The card goes immediately; a TV gives no other feedback and
+    /// waiting on the round trip reads as a dropped press.
+    private func sendFeedback(for video: Video, token: String?, iconType: String) {
+        closeCardMenu()
+        guard auth.isSignedIn else { isSigningIn = true; return }
+        let hidesChannel = iconType == "BLOCK_CHANNEL"
+        let keep: (Video) -> Bool = hidesChannel
+            ? { $0.channelId != video.channelId }
+            : { $0.id != video.id }
+        customShelves = customShelves.map { shelf in
+            var shelf = shelf; shelf.videos = shelf.videos.filter(keep); return shelf
+        }
+        if hidesChannel, let channelId = video.channelId {
+            NotificationCenter.default.post(name: .hideChannelFromFeed, object: nil,
+                                            userInfo: ["channelId": channelId])
+        } else {
+            NotificationCenter.default.post(name: .hideVideoFromFeed, object: nil,
+                                            userInfo: ["videoId": video.id])
+        }
+        Task { [api] in
+            do {
+                if let token { try await api.sendFeedback(token: token) }
+                else { try await api.sendFeedbackForVideo(videoId: video.id, iconType: iconType) }
+            } catch {
+                // Already gone from the screen; nothing useful to show for a
+                // failed background write.
+            }
+        }
     }
 
     /// Set while a channel from the guide is being shown, which replaces the
@@ -571,6 +731,16 @@ final class AppModel {
             return
         }
 
+        if let cardMenu {
+            switch intent {
+            case let .move(direction): cardMenu.move(direction)
+            case .select:              cardMenu.select()
+            case .back, .menu:         closeCardMenu()
+            default:                   break
+            }
+            return
+        }
+
         if let player {
             player.handle(intent)
             if player.didRequestDismiss { dismissPlayer() }
@@ -593,7 +763,7 @@ final class AppModel {
         case .select:
             switch focus {
             case let .card(shelf, index):
-                if let video = video(shelf: shelf, index: index) { present(video) }
+                if let video = video(shelf: shelf, index: index) { activate(video) }
             case .rail(.account):
                 if auth.isSignedIn { withAnimation(Theme.stateChange) { isConfirmingSignOut = true } }
                 else { isSigningIn = true }
@@ -633,7 +803,12 @@ final class AppModel {
                 isRailExpanded = true
             }
 
-        case .menu, .playPause, .seek:
+        case .menu:
+            if case let .card(shelf, index) = focus, let video = video(shelf: shelf, index: index) {
+                openCardMenu(for: video)
+            }
+
+        case .playPause, .seek:
             break
         }
     }
@@ -681,7 +856,7 @@ final class AppModel {
     func click(shelf: Int, index: Int) {
         pointerAnchor = .zero          // a click is deliberate; never suppress it
         hover(shelf: shelf, index: index)
-        if let video = video(shelf: shelf, index: index) { present(video) }
+        if let video = video(shelf: shelf, index: index) { activate(video) }
     }
 
     func confirmSignOut() {
@@ -870,6 +1045,12 @@ final class AppModel {
             browse.loadMoreIfNeeded(lastVideo: last)
         }
     }
+}
+
+extension Video {
+    /// A playlist drawn as a card (Library, a channel's Playlists row): its
+    /// id is the playlist id, so it opens the playlist rather than playing.
+    var isPlaylistTile: Bool { playlistId == id }
 }
 
 extension BrowseFocus {
