@@ -176,6 +176,10 @@ final class MusicModel {
         // recommendations ladder.
         settings.autoplayEnabled = false
         playback.updateSettings(settings)
+        // Was only checked at the moment a track started playing, so toggling
+        // the setting mid-session (or the auto-extend already having fired
+        // once) didn't actually stop the queue from growing a radio tail.
+        session.autoExtendsQueue = settings.musicQueueEnabled
     }
 
     /// The music queue is on unless the user opted out, in which case selecting

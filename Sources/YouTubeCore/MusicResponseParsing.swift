@@ -687,7 +687,12 @@ enum MusicParse {
               let title = renderer.at("title").text,
               !renderer["unplayableText"].exists else { return nil }
 
-        let fields = subtitleFields(renderer.at("longBylineText.runs").array)
+        // A queue row carries no type-label run — that's a search/tile shape.
+        // Leaving the default (skipTypeLabel: true) meant an unlinked artist
+        // run at the head of the byline (common on radio/UGC rows, the same
+        // shape a real type label has) got silently eaten as one, shifting
+        // every field after it out of place too.
+        let fields = subtitleFields(renderer.at("longBylineText.runs").array, skipTypeLabel: false)
         return MusicTrack(
             id: videoId,
             title: title,
@@ -741,7 +746,7 @@ enum MusicParse {
     static func lyrics(_ response: [String: Any]) -> (text: String, source: String?)? {
         let shelf = JSONCursor(response).firstDescendant("musicDescriptionShelfRenderer")
         guard let text = shelf.at("description").text, !text.isEmpty else { return nil }
-        let source = shelf.at("footer").text ?? shelf.at("runs.0.text").string
+        let source = shelf.at("footer").text ?? shelf.at("description.runs.0.text").string
         return (text, source)
     }
 }

@@ -19,6 +19,12 @@ public actor LyricsService {
     /// re-opened within a session, not across days.
     private var cache = TTLCache<String, Lyrics>(ttl: 3600, maxEntries: 60)
 
+    /// One chain walk in flight per track — without this, skipping back onto
+    /// a song already loading (or two views racing the same track) started
+    /// the whole five-provider chain a second time; the cache is only
+    /// written at the end, so it doesn't catch this on its own.
+    private var inFlight: [String: Task<Lyrics?, Never>] = [:]
+
     /// Manual corrections, which outrank everything and never expire.
     private var pinned: [String: Lyrics]
     private static let pinnedKey = "lyrics.pinned.v1"
@@ -47,7 +53,16 @@ public actor LyricsService {
     public func lyrics(for track: MusicTrack, ytMusicBrowseId: String?) async -> Lyrics? {
         if let correction = pinned[track.id] { return correction }
         if let cached = cache.get(track.id) { return cached }
+        if let running = inFlight[track.id] { return await running.value }
 
+        let task = Task { await self.runChain(for: track, ytMusicBrowseId: ytMusicBrowseId) }
+        inFlight[track.id] = task
+        let result = await task.value
+        inFlight[track.id] = nil
+        return result
+    }
+
+    private func runChain(for track: MusicTrack, ytMusicBrowseId: String?) async -> Lyrics? {
         let query = LyricsQuery(track: track)
         var gathered: [LyricsCandidate] = []
 
@@ -65,8 +80,15 @@ public actor LyricsService {
                     """)
                 // A confident, timed match is not worth four more round trips to
                 // confirm. Anything less keeps walking so `resolve` has something
-                // to cross-check against.
-                if candidate.score >= LyricsMatching.confidentThreshold, candidate.lyrics.isSynced {
+                // to cross-check against. An unsynced match can still be
+                // confident enough on its own (Genius routinely scores 0.95+
+                // on title/artist alone) — requiring `isSynced` here meant a
+                // near-certain Genius hit always burned the rest of the chain,
+                // including a Musixmatch token mint, for nothing.
+                let confidentAndSynced = candidate.score >= LyricsMatching.confidentThreshold
+                    && candidate.lyrics.isSynced
+                let veryConfident = candidate.score >= 0.95
+                if confidentAndSynced || veryConfident {
                     break
                 }
             } catch {

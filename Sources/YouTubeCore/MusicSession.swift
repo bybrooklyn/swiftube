@@ -31,7 +31,21 @@ public final class MusicSession {
 
     private let api: InnerTubeAPI
 
-    public private(set) var queue = MusicQueue()
+    public private(set) var queue = MusicQueue() {
+        didSet { queueGeneration += 1 }
+    }
+    /// Bumped on every mutation of `queue`, in place or wholesale. Lets an
+    /// in-flight `/next`/continuation request notice the queue it was about
+    /// to write into is not the one it started against — switching albums
+    /// mid-flight used to let a radio tail (and its continuation token) land
+    /// in whatever queue existed when the response came back, with no check.
+    private var queueGeneration = 0
+
+    /// The "opt out of the queue" setting, mirrored from `AppSettings` by
+    /// `MusicModel`. Gates the one-track auto-extend in
+    /// `refreshTrackContext` — without this, opting out only delayed the
+    /// radio tail by one round trip instead of actually not building one.
+    public var autoExtendsQueue = true
     public private(set) var source: Source?
     public private(set) var isLoading = false
     public private(set) var lastError: Error?
@@ -216,12 +230,13 @@ public final class MusicSession {
     /// Deliberately fired *after* the track is published, so a slow response
     /// delays the queue tail rather than the first note.
     private func refreshTrackContext(for track: MusicTrack) async {
+        let generation = queueGeneration
         do {
             let page = try await api.fetchMusicQueue(videoId: track.id, playlistId: track.playlistId)
             // A slow response must not stomp a queue the user has since changed.
             guard currentTrack?.id == track.id else { return }
             lyricsBrowseId = page.lyricsBrowseId
-            guard queue.count == 1 else { return }
+            guard autoExtendsQueue, queue.count == 1, generation == queueGeneration else { return }
             queue.radioContinuation = page.continuation
             queue.append(page.tracks.filter { !$0.isPodcastEpisode })
         } catch {
@@ -233,8 +248,17 @@ public final class MusicSession {
         // Clear first: `refillIfNeeded` fires on every track change, and without
         // this the same token is spent several times over.
         queue.radioContinuation = nil
+        // Snapshotted *after* the clear above, which itself bumps the
+        // generation — otherwise every call would see its own clear as "the
+        // queue changed" and refuse to write its own result.
+        let generation = queueGeneration
         do {
             let page = try await api.fetchMusicQueueContinuation(token)
+            // The queue was replaced (a different album/playlist/track started)
+            // while this was in flight — the radio tail belongs to a queue
+            // that no longer exists; do not inject it or its continuation
+            // token into whatever queue exists now.
+            guard generation == queueGeneration else { return }
             queue.append(page.tracks.filter { !$0.isPodcastEpisode })
             queue.radioContinuation = page.continuation
         } catch {

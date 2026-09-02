@@ -347,6 +347,11 @@ public actor MusixmatchTokenStore {
     private var token: String?
     private var issuedAt: Date?
     private var blockedUntil: Date?
+    /// One mint in flight at a time — `await LyricsHTTP.json` suspends inside
+    /// this actor, so N callers arriving before the first returns all pass
+    /// the `token == nil` check above and each fire their own `token.get`.
+    /// One IP minting N tokens at once is exactly what trips the captcha.
+    private var inFlight: Task<String?, Never>?
 
     /// Tokens have no published lifetime; ten hours is comfortably inside what
     /// the desktop app reuses one for.
@@ -358,7 +363,24 @@ public actor MusixmatchTokenStore {
             return token
         }
         if let blockedUntil, Date() < blockedUntil { return nil }
+        if let inFlight { return await inFlight.value }
 
+        let task = Task { await self.mintToken(session: session) }
+        inFlight = task
+        let result = await task.value
+        inFlight = nil
+        return result
+    }
+
+    /// A non-2xx/captcha response here backs the provider off the same as a
+    /// refused token.get — previously only token.get itself set `blockedUntil`,
+    /// so a captcha on this call just threw and was silently retried (and
+    /// re-tripped) on the very next track.
+    public func recordFailure() {
+        blockedUntil = Date().addingTimeInterval(backoff)
+    }
+
+    private func mintToken(session: URLSession) async -> String? {
         guard let url = URL(string:
             "https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0&format=json"),
               let json = try? await LyricsHTTP.json(url, session: session, headers: ["Cookie": "AWSELB=0"])
@@ -412,7 +434,17 @@ public struct MusixmatchProvider: LyricsProvider {
         }
         guard let url = components.url else { return nil }
 
-        let json = JSONCursor(try await LyricsHTTP.json(url, session: session, headers: ["Cookie": "AWSELB=0"]))
+        let response: Any
+        do {
+            response = try await LyricsHTTP.json(url, session: session, headers: ["Cookie": "AWSELB=0"])
+        } catch {
+            // A captcha lands here too, not only on token.get — without this
+            // the backoff only ever triggered on the mint call, and a captcha
+            // on the macro call itself just got silently retried next track.
+            await MusixmatchTokenStore.shared.recordFailure()
+            throw error
+        }
+        let json = JSONCursor(response)
         let calls = json.at("message.body.macro_calls")
 
         // What the server thinks it matched, which is what gets scored.
