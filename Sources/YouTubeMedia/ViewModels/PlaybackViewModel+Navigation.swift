@@ -123,6 +123,13 @@ extension PlaybackViewModel {
     }
 
     public func handlePlaybackEnd() {
+        // PORT NOTE (music queue): when a caller owns what plays next — the
+        // Music tab's queue does — it takes the whole decision, before loop and
+        // before the CurrentQueueStore/recommendations ladder below.
+        if let onPlaybackEnded {
+            onPlaybackEnded()
+            return
+        }
         if settings.loopEnabled {
             player.seek(to: .zero)
             player.rate = Float(settings.playbackSpeed)

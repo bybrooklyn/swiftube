@@ -443,6 +443,16 @@ public final class PlaybackViewModel {
     nonisolated(unsafe) var cachedArtwork: PlatformImage? = nil
     @ObservationIgnored var cachedArtworkVideoID: String? = nil
 
+    // MARK: - External end-of-playback hook
+    //
+    // PORT NOTE (music queue, plan 9.2): upstream's `handlePlaybackEnd` decides
+    // what plays next entirely on its own — loop, then CurrentQueueStore, then
+    // recommendations. The Music tab owns that decision instead: its queue has
+    // shuffle, three repeat modes and a radio tail that upstream knows nothing
+    // about. Setting this hands the decision to the caller and short-circuits
+    // the whole ladder; leaving it nil is exactly the old behaviour.
+    @ObservationIgnored public var onPlaybackEnded: (@MainActor () -> Void)?
+
     // MARK: - Dependencies
 
     let api: InnerTubeAPI

@@ -89,3 +89,4 @@ leanback-*.png
 
 # Playwright MCP artefacts
 .playwright-mcp/
+.claude/worktrees/

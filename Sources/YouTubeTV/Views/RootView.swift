@@ -65,6 +65,11 @@ struct RootView: View {
                         .zIndex(3)
                 }
 
+                if let music = model.music {
+                    MusicView(model: music)
+                        .zIndex(3)
+                }
+
                 // Hosted outside the conditional so the dialog's glass
                 // materialises in and out rather than cutting (see GlassHost).
                 GlassHost {

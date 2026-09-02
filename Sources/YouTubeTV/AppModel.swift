@@ -63,6 +63,14 @@ final class AppModel {
     /// whole device-code flow again.
     private(set) var isConfirmingSignOut = false
 
+    /// Non-nil while the Music tab is up.
+    ///
+    /// Modal like search and settings rather than a browse section, because
+    /// YouTube Music's catalog is not a video feed — an album page is a header
+    /// over a numbered track list, and the now-playing panel is a queue and a
+    /// lyrics view. None of that is a shelf of `Video`s.
+    private(set) var music: MusicModel?
+
     private(set) var focus: BrowseFocus = .card(shelf: 0, index: 0)
     private(set) var isRailExpanded = false
 
@@ -370,6 +378,16 @@ final class AppModel {
             return
         }
 
+        // Music is its own surface (plan 9.5), not `fetchMusic()`'s generic
+        // shelf of videos.
+        if item == .music {
+            selectedRailItem = item
+            memory.railItem = item
+            isRailExpanded = false
+            openMusic()
+            return
+        }
+
         // The surfaces assembled here rather than by BrowseViewModel: a channel's
         // uploads, the search-backed Podcasts entry, and Library.
         //
@@ -464,6 +482,18 @@ final class AppModel {
     /// Auth state as it was when Settings opened, so `closeSettings` can tell
     /// whether the account row changed it.
     @ObservationIgnored private var settingsWasSignedIn = false
+
+    func openMusic() {
+        music = MusicModel(api: api, settingsStore: settingsStore)
+        music?.start()
+    }
+
+    private func closeMusic() {
+        music?.stop()
+        music = nil
+        focus = .rail(.music)
+        isRailExpanded = true
+    }
 
     func openSettings() {
         isRailExpanded = false
@@ -977,6 +1007,14 @@ final class AppModel {
             case .back, .menu:         closeCardMenu()
             default:                   break
             }
+            return
+        }
+
+        if let music {
+            music.handle(intent)
+            // Left from the leftmost column, or Back at the tab's root: the
+            // guide takes over, the same gesture that leaves a browse shelf.
+            if music.didRequestExit { closeMusic() }
             return
         }
 
