@@ -61,7 +61,7 @@ struct TVPlayerView: View {
             GlassHost {
                 if let menu = model.menu {
                     PlayerMenuView(model: menu, onBack: { model.closeMenu() })
-                        .transition(.opacity)
+                        .transition(Theme.panelTransition)
                 }
             }
             .zIndex(2)

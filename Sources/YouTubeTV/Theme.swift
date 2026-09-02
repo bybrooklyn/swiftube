@@ -166,6 +166,13 @@ enum Theme {
     /// The guide's selection highlight, which the real client moves on a short
     /// linear curve rather than the travel curve.
     static let highlight = Animation.linear(duration: 0.15)
+
+    /// How a floating panel (menu, dialog, action sheet) comes and goes: a
+    /// fade with a touch of scale, so it settles into place rather than
+    /// popping. Runs on whichever curve the caller animates with; on a glass
+    /// panel it combines with the container's materialize.
+    @MainActor
+    static var panelTransition: AnyTransition { .opacity.combined(with: .scale(scale: 0.97)) }
 }
 
 // MARK: - Viewport size in the environment

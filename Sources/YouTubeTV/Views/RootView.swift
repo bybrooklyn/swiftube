@@ -73,7 +73,7 @@ struct RootView: View {
                             symbol: "person.crop.circle.badge.xmark",
                             onCancel: { model.cancelSignOut() }
                         )
-                        .transition(.opacity)
+                        .transition(Theme.panelTransition)
                     }
                 }
                 .zIndex(4)
@@ -113,12 +113,18 @@ struct RootView: View {
         .onChange(of: model.layout) { _, _ in model.layoutDidChange() }
     }
 
+    /// Laid out like `SurfaceMessage`, its sibling in the same if/else, so the
+    /// two states of an empty surface read as one design.
     private var loadingState: some View {
-        VStack(spacing: 18) {
-            ProgressView().controlSize(.large)
-            Text("Loading your feed…")
-                .font(.system(size: 16))
-                .foregroundStyle(Theme.textSecondary)
+        GeometryReader { geo in
+            VStack(spacing: Theme.Metrics.rem(0.9, geo.size)) {
+                LoadingIndicator()
+                Text("Loading your feed…")
+                    .font(.system(size: Theme.Metrics.rem(1.05, geo.size)))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.leading, Theme.Metrics.contentInset(geo.size))
         }
     }
 }

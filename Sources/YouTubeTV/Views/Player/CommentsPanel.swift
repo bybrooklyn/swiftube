@@ -30,7 +30,7 @@ struct CommentsPanel: View {
             }
 
             if model.isLoadingComments {
-                ProgressView().controlSize(.large)
+                LoadingIndicator()
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, rem(2))
             } else if model.comments.isEmpty {

@@ -66,7 +66,7 @@ struct TopBar: View {
                     .fill(Theme.brand)
                     .frame(width: height * 1.42, height: height)
                 Triangle()
-                    .fill(.white)
+                    .fill(Theme.textPrimary)   // the same white as the wordmark beside it
                     .frame(width: height * 0.34, height: height * 0.40)
                     .offset(x: height * 0.03)
             }
