@@ -128,6 +128,29 @@ package enum InnerTubeClients {
         package static let userAgent = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)"
     }
 
+    /// YouTube Music's own web client. Everything under `music.youtube.com`
+    /// (albums, artists, the library, `/next` queues, lyrics) is served only to
+    /// this client name — the WEB/TVHTML5 clients get a generic video shelf for
+    /// the same browse ids.
+    ///
+    /// Unlike every other client here the version is *dated*, not pinned:
+    /// YouTube Music ships a build a day and its own web app sends today's
+    /// stamp, which is what ytmusicapi does too. A stale constant is the one
+    /// thing that reliably gets these requests refused.
+    package enum WebRemix {
+        package static let name   = "WEB_REMIX"
+        package static let nameID = "67"
+        package static var version: String {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd"
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            return "1.\(formatter.string(from: Date())).01.00"
+        }
+        package static let origin = "https://music.youtube.com"
+        package static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+
     /// Maximum number of videos fetched per shelf/related-videos request.
     package static let maxVideoResults = 20
 }
