@@ -18,8 +18,7 @@ struct RootView: View {
                            isPremium: false)
                     if let channel = model.channelHeader {
                         ChannelHeader(channel: channel,
-                                      isFocused: model.focus == .topBar(.subscribe),
-                                      onSelect: { model.toggleSubscription() })
+                                      isFocused: model.focus == .topBar(.subscribe))
                             .padding(.horizontal, Theme.Metrics.contentInset(geo.size))
                             .padding(.bottom, Theme.Metrics.rem(1.25, geo.size))
                             .transition(.opacity)
@@ -43,9 +42,7 @@ struct RootView: View {
                           selected: model.selectedRailItem,
                           channels: model.guideChannels,
                           accountName: model.auth.accountName,
-                          accountAvatarURL: model.auth.accountAvatarURL,
-                          onHover: { model.hover(rail: $0) },
-                          onSelect: { model.click(rail: $0) })
+                          accountAvatarURL: model.auth.accountAvatarURL)
 
                 if model.isLoading {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -84,7 +81,6 @@ struct RootView: View {
                         .zIndex(1)
                 }
             }
-            .overlay(alignment: .topLeading) { TrafficLights() }
             // Pinned to the window, and clipped.
             //
             // A ZStack takes the size of its largest child, and the shelf rows

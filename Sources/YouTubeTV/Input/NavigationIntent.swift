@@ -15,6 +15,18 @@ public enum NavigationIntent: Equatable, Sendable {
     case menu
     case playPause
     case seek(SeekDirection)
+    /// Tab / Shift-Tab: the next or previous element in reading order. The
+    /// browse surface walks cards across row ends; every other surface treats
+    /// it as a move along its one axis (`asMove(horizontal:)`).
+    case tab(forward: Bool)
+
+    /// `.tab` reduced to a plain move for surfaces that are a single list —
+    /// horizontal for a row of controls, vertical for a column of rows.
+    func asMove(horizontal: Bool) -> NavigationIntent {
+        guard case let .tab(forward) = self else { return self }
+        if horizontal { return .move(forward ? .right : .left) }
+        return .move(forward ? .down : .up)
+    }
 }
 
 public enum SeekDirection: Equatable, Sendable {

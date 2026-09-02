@@ -48,9 +48,16 @@ final class KeyboardReader {
         case 53: return .back                // Escape
         case 49: return .playPause           // Space
         case 51, 117: return .back           // Delete, forward-delete
+        case 48: return .tab(forward: !event.modifierFlags.contains(.shift))
         default: break
         }
         switch event.charactersIgnoringModifiers?.lowercased() {
+        // WASD: the layout Steam Input templates emit most often. The header
+        // above promised it; only the arrows were ever mapped.
+        case "w": return .move(.up)
+        case "s": return .move(.down)
+        case "a": return .move(.left)
+        case "d": return .move(.right)
         case "m": return .menu
         case "j": return .seek(.backward)
         case "l": return .seek(.forward)

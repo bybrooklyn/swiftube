@@ -25,9 +25,6 @@ struct GuideRail: View {
     let channels: [Channel]
     let accountName: String?
     let accountAvatarURL: URL?
-    /// The guide is navigable with the pointer as well as the d-pad.
-    var onHover: (RailItem) -> Void = { _ in }
-    var onSelect: (RailItem) -> Void = { _ in }
 
     @Environment(\.viewportSize) private var viewport
 
@@ -54,13 +51,10 @@ struct GuideRail: View {
                     if needsDividerBefore(item) { divider }
                     row(for: item)
                         .frame(height: Theme.Metrics.railItemHeight(viewport))
-                        .contentShape(.rect)
-                        .onHover { inside in if inside { onHover(item) } }
-                        .onTapGesture { onSelect(item) }
                 }
             }
             .offset(y: scrollOffset(in: geo.size))
-            .animation(Theme.travel, value: focusedItem)
+            .animation(Theme.travel, value: anchorItem)
             .frame(maxHeight: .infinity, alignment: .top)
             .padding(.vertical, Theme.Metrics.rem(2.4, viewport))
             .clipped()
@@ -132,26 +126,42 @@ struct GuideRail: View {
         .clipped()
     }
 
-    /// Keeps the focused entry inside the visible column.
+    /// The entry the column scrolls to keep in view: the focused one while the
+    /// guide has focus, otherwise the current section. The collapsed rail used
+    /// to anchor on nothing, so with focus in the content it sat at the top of
+    /// the list and a current section low in it (Sports, Settings) was simply
+    /// off the bottom — and the first press into the guide then jumped.
+    private var anchorItem: RailItem { focusedItem ?? selected }
+
+    /// Keeps the anchor entry inside the visible column.
     ///
-    /// Stateless: derived from the focused index each time rather than
+    /// Stateless: derived from the anchor's position each time rather than
     /// accumulated, so it cannot drift out of step with focus. Zero until the
-    /// focused row would fall past the bottom, then just enough to bring it back.
+    /// anchor row would fall past the bottom, then just enough to bring it back
+    /// with a row of lookahead below it.
     private func scrollOffset(in size: CGSize) -> CGFloat {
         let itemHeight = Theme.Metrics.railItemHeight(viewport)
         let dividerHeight = Self.dividerHeight(viewport)
         let visible = max(size.height - Theme.Metrics.rem(2.4, viewport) * 2, itemHeight)
 
-        var focusedTop: CGFloat = 0
+        var anchorTop: CGFloat = 0
         var total: CGFloat = 0
         for item in items {
             if needsDividerBefore(item) { total += dividerHeight }
-            if item == focusedItem { focusedTop = total }
+            if item == anchorItem { anchorTop = total }
             total += itemHeight
         }
+        return Self.scrollOffset(anchorTop: anchorTop, itemHeight: itemHeight,
+                                 total: total, visible: visible)
+    }
 
+    /// The rule on its own, so it can be pinned down in tests: the anchor row
+    /// plus one row of lookahead stays above the bottom edge, the list never
+    /// scrolls past its end, and a list that fits does not scroll at all.
+    static func scrollOffset(anchorTop: CGFloat, itemHeight: CGFloat,
+                             total: CGFloat, visible: CGFloat) -> CGFloat {
         guard total > visible else { return 0 }
-        return -min(max(focusedTop + itemHeight * 2 - visible, 0), total - visible)
+        return -min(max(anchorTop + itemHeight * 2 - visible, 0), total - visible)
     }
 
     /// Two hairlines: after Shorts, and after Library.

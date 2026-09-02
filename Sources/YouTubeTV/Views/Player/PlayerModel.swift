@@ -181,6 +181,9 @@ final class PlayerModel {
     // MARK: - Intents
 
     func handle(_ intent: NavigationIntent) {
+        // Every list in the player is horizontal except the two panels below,
+        // which take Tab as a vertical step of their own.
+        let intent = intent.asMove(horizontal: descriptionScroll == nil && commentIndex == nil)
         // A failed load owns every press: Select retries, anything else leaves.
         // `retryLoad()` had no caller at all before this, so the ladder's own
         // recovery path was unreachable from the UI.
@@ -207,6 +210,7 @@ final class PlayerModel {
                 playback.togglePlayPause()
             case let .seek(direction):
                 seek(direction)
+            case .tab: break   // reduced to .move at the top of handle(_:)
             }
             showControls()
             return
@@ -219,6 +223,7 @@ final class PlayerModel {
             case .back, .menu:         closeMenu()
             case .playPause:           playback.togglePlayPause()
             case let .seek(direction): seek(direction)
+            case .tab:                 break   // reduced to .move at the top of handle(_:)
             }
             showControls()
             return
@@ -238,6 +243,7 @@ final class PlayerModel {
                 playback.togglePlayPause()
             case let .seek(direction):
                 seek(direction)
+            case .tab: break   // reduced to .move at the top of handle(_:)
             }
             showControls()
             return
@@ -266,6 +272,7 @@ final class PlayerModel {
             case .menu:
                 closeUpNext()
                 openMenu()
+            case .tab: break   // reduced to .move at the top of handle(_:)
             }
             showControls()
             return
@@ -315,6 +322,8 @@ final class PlayerModel {
 
         case .menu:
             openMenu()
+
+        case .tab: break   // reduced to .move at the top of handle(_:)
         }
     }
 
@@ -401,27 +410,8 @@ final class PlayerModel {
         }
     }
 
-    func hoverComment(_ index: Int) {
-        guard comments.indices.contains(index), commentIndex != index else { return }
-        withAnimation(Theme.stateChange) { commentIndex = index }
-    }
-
     private func closeUpNext() {
         withAnimation(Theme.stateChange) { upNextIndex = nil }
-    }
-
-    /// Pointer support, matching the browse surface: hover focuses, click plays.
-    func hoverUpNext(_ index: Int) {
-        guard upNext.indices.contains(index), upNextIndex != index else { return }
-        withAnimation(Theme.stateChange) { upNextIndex = index }
-        showControls()
-    }
-
-    func clickUpNext(_ index: Int) {
-        guard upNext.indices.contains(index) else { return }
-        let video = upNext[index]
-        closeUpNext()
-        play(video)
     }
 
     func openMenu() {
