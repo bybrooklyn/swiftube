@@ -22,9 +22,12 @@ struct CommentsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: rem(1.0)) {
-            Text("Comments")
-                .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+            HStack(spacing: rem(0.8)) {
+                BackChip(action: { model.closeComments() })
+                Text("Comments")
+                    .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
 
             if model.isLoadingComments {
                 ProgressView().controlSize(.large)
@@ -44,7 +47,7 @@ struct CommentsPanel: View {
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: rem(1.0), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.sheetCorner(viewport), style: .continuous))
     }
 
     private var list: some View {

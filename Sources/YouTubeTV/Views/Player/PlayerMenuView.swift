@@ -8,17 +8,28 @@ import SwiftUI
 struct PlayerMenuView: View {
 
     @Bindable var model: PlayerMenuModel
+    var onBack: () -> Void = {}
     @Environment(\.viewportSize) private var viewport
 
     private func rem(_ n: CGFloat) -> CGFloat { Theme.Metrics.rem(n, viewport) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            categories
-            options
+        VStack(alignment: .leading, spacing: rem(0.6)) {
+            BackChip(action: onBack)
+            HStack(alignment: .top, spacing: 0) {
+                categories
+                options
+            }
         }
         .padding(rem(1))
-        .background(.black.opacity(0.92), in: .rect(cornerRadius: rem(1)))
+        // The "small button cluster over video" case: glass here is sanctioned,
+        // and it is the one place the app draws any.
+        .glassPanel(tint: .black.opacity(0.55),
+                    fallback: .black.opacity(0.92),
+                    corner: Theme.Metrics.sheetCorner(viewport))
+        // The options column changes length with the category, and the glass
+        // shape follows it — animated, so the panel morphs rather than snaps.
+        .animation(Theme.travel, value: model.category)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, Theme.Metrics.playerInset(viewport))
         .padding(.bottom, viewport.height * 0.20)
@@ -46,7 +57,7 @@ struct PlayerMenuView: View {
                 .frame(height: rem(2.4))
                 .frame(width: rem(17), alignment: .leading)
                 .background {
-                    RoundedRectangle(cornerRadius: rem(0.5), style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Metrics.plateCorner(viewport), style: .continuous)
                         .fill(isFocused ? Theme.focusRing
                               : (isActive ? Theme.control.opacity(0.6) : .clear))
                 }
@@ -73,7 +84,7 @@ struct PlayerMenuView: View {
                 .frame(height: rem(2.4))
                 .frame(width: rem(11), alignment: .leading)
                 .background {
-                    RoundedRectangle(cornerRadius: rem(0.5), style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Metrics.plateCorner(viewport), style: .continuous)
                         .fill(isFocused ? Theme.focusRing : .clear)
                 }
                 .animation(Theme.stateChange, value: isFocused)

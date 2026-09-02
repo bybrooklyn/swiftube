@@ -356,7 +356,7 @@ final class AppModel {
         search = SearchModel(api: api)
     }
 
-    private func closeSearch() {
+    func closeSearch() {
         search = nil
         focus = .rail(.search)
         isRailExpanded = true
@@ -376,7 +376,7 @@ final class AppModel {
         }
     }
 
-    private func closeSettings() {
+    func closeSettings() {
         let wasSignedIn = settingsWasSignedIn
         settings = nil
         // Settings changes affect playback, so hand the new values to the

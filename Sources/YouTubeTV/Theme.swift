@@ -96,16 +96,18 @@ enum Theme {
         // MARK: Guide
 
         static func railCollapsed(_ s: CGSize) -> CGFloat { rem(6.5, s) }
-        static func railExpanded(_ s: CGSize) -> CGFloat { rem(22.25, s) }
+        /// Narrower than the 22.25rem first measured: side by side with the
+        /// stock TV app the open guide read as too wide, so it is trimmed to
+        /// the label column plus the pill's own margin.
+        static func railExpanded(_ s: CGSize) -> CGFloat { rem(19.5, s) }
         /// How far content slides right when the guide opens. The guide pushes
-        /// content; it does not overlay it.
-        static func guidePush(_ s: CGSize) -> CGFloat { rem(15.75, s) }
+        /// content; it does not overlay it. Expanded width minus collapsed.
+        static func guidePush(_ s: CGSize) -> CGFloat { railExpanded(s) - railCollapsed(s) }
         static func railItemHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
-        static func railPillWidth(_ s: CGSize) -> CGFloat { rem(18.5, s) }
-        /// Square. The guide is a rectangular column and a rounded highlight
-        /// inside it reads as a different object sitting on top, rather than
-        /// part of the sidebar.
-        static func railPillCorner(_ s: CGSize) -> CGFloat { 0 }
+        static func railPillWidth(_ s: CGSize) -> CGFloat { rem(16, s) }
+        /// The stock app rounds its rail items; a square pill read as a debug
+        /// highlight. Same radius as every other plate in the UI.
+        static func railPillCorner(_ s: CGSize) -> CGFloat { plateCorner(s) }
         static func railPillHeight(_ s: CGSize) -> CGFloat { rem(3.25, s) }
         /// Left edge of the selection shape, and of the dividers.
         static func railPillLeading(_ s: CGSize) -> CGFloat { rem(1.375, s) }
@@ -128,6 +130,17 @@ enum Theme {
         static func transportButton(_ s: CGSize) -> CGFloat { rem(3, s) }
         static func transportButtonLarge(_ s: CGSize) -> CGFloat { rem(4, s) }
         static func transportGap(_ s: CGSize) -> CGFloat { rem(0.5, s) }
+
+        // MARK: Corners
+        //
+        // Three radii, by tier: a sheet is a panel that owns its own layout
+        // (menu, dialog, description column), a plate is a block set on top of
+        // something else (stats, error panel), a badge is a single line of
+        // text on a fill (caption cue, duration).
+
+        static func sheetCorner(_ s: CGSize) -> CGFloat { rem(1, s) }
+        static func plateCorner(_ s: CGSize) -> CGFloat { rem(0.5, s) }
+        static func badgeCorner(_ s: CGSize) -> CGFloat { rem(0.3, s) }
 
         static let cardAspect: CGFloat = 16.0 / 9.0
 
@@ -172,6 +185,73 @@ extension EnvironmentValues {
     var viewportSize: CGSize {
         get { self[ViewportSizeKey.self] }
         set { self[ViewportSizeKey.self] = newValue }
+    }
+}
+
+// MARK: - Liquid Glass
+
+private struct LiquidGlassKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// Mirrors `AppSettings.liquidGlassEnabled`, published once at the root so a
+    /// glass surface can fall back to its flat fill without reaching for the
+    /// settings store.
+    var liquidGlass: Bool {
+        get { self[LiquidGlassKey.self] }
+        set { self[LiquidGlassKey.self] = newValue }
+    }
+}
+
+/// A small floating panel over video or over the page: real `.glassEffect`,
+/// or the flat fill when the user has turned glass off.
+///
+/// Only for the small surfaces CLAUDE.md sanctions — the menu, a dialog. Not
+/// for anything full-width over playing video.
+///
+/// The panel must sit inside a `GlassHost` that *outlives* it: the materialize
+/// transition and the shape morph when the content resizes are driven by the
+/// container, so a container created and destroyed with the panel gives a
+/// plain fade — which is exactly the "static appear/disappear" this replaces.
+private struct GlassPanel: ViewModifier {
+    let tint: Color
+    let fallback: Color
+    let corner: CGFloat
+    @Environment(\.liquidGlass) private var enabled
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .glassEffect(.regular.tint(tint), in: .rect(cornerRadius: corner))
+                .glassEffectTransition(.materialize)
+        } else {
+            content.background(fallback, in: .rect(cornerRadius: corner))
+        }
+    }
+}
+
+/// The `GlassEffectContainer` a `glassPanel` needs, placed around the
+/// *conditional* that shows and hides the panel so it survives the panel.
+/// With glass off it is nothing at all — no empty container render pass.
+struct GlassHost<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @Environment(\.liquidGlass) private var enabled
+
+    var body: some View {
+        if enabled {
+            GlassEffectContainer(content: content)
+        } else {
+            content()
+        }
+    }
+}
+
+extension View {
+    /// See `GlassPanel`. `tint` is the colour laid into the glass; `fallback`
+    /// is the opaque fill drawn instead when glass is off.
+    func glassPanel(tint: Color, fallback: Color, corner: CGFloat) -> some View {
+        modifier(GlassPanel(tint: tint, fallback: fallback, corner: corner))
     }
 }
 

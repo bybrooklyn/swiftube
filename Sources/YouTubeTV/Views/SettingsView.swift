@@ -10,6 +10,7 @@ import YouTubeMedia
 struct SettingsView: View {
 
     @Bindable var model: SettingsModel
+    var onBack: () -> Void = {}
     @Environment(\.viewportSize) private var viewport
 
     var body: some View {
@@ -25,10 +26,13 @@ struct SettingsView: View {
             Color.clear.frame(width: Theme.Metrics.contentInset(viewport))
 
             VStack(alignment: .leading, spacing: Theme.Metrics.rem(1.0, viewport)) {
-                Text("Settings")
-                    .font(.system(size: Theme.Metrics.rem(2.0, viewport), weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.bottom, Theme.Metrics.rem(0.5, viewport))
+                HStack(spacing: Theme.Metrics.rem(1.0, viewport)) {
+                    BackChip(action: onBack)
+                    Text("Settings")
+                        .font(.system(size: Theme.Metrics.rem(2.0, viewport), weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .padding(.bottom, Theme.Metrics.rem(0.5, viewport))
 
                 ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
                     switch row.kind {

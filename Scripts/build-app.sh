@@ -22,7 +22,9 @@ if [[ "${1:-}" == "--release" ]]; then
 fi
 
 echo "▶ Building $APP_NAME ($CONFIG)…"
-swift build -c "$CONFIG" --package-path "$ROOT"
+# Native backend against the 26 SDK — see the note at the top of the justfile.
+export SDKROOT="${SDKROOT_OVERRIDE:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk}"
+swift build -c "$CONFIG" --package-path "$ROOT" --build-system native
 
 BIN="$ROOT/.build/$CONFIG/$EXECUTABLE"
 APP="$ROOT/build/$APP_NAME.app"

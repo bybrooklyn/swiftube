@@ -5,14 +5,18 @@ import YouTubeCore
 struct SearchView: View {
 
     @Bindable var model: SearchModel
+    var onBack: () -> Void = {}
     @Environment(\.viewportSize) private var viewport
 
     private func rem(_ n: CGFloat) -> CGFloat { Theme.Metrics.rem(n, viewport) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: rem(3)) {
-            keyboard
-            results
+        VStack(alignment: .leading, spacing: rem(1)) {
+            BackChip(action: onBack)
+            HStack(alignment: .top, spacing: rem(3)) {
+                keyboard
+                results
+            }
         }
         .padding(.leading, Theme.Metrics.contentInset(viewport))
         .padding(.trailing, rem(2))

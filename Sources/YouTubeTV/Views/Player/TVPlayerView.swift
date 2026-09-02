@@ -56,11 +56,15 @@ struct TVPlayerView: View {
                     .zIndex(3)
             }
 
-            if let menu = model.menu {
-                PlayerMenuView(model: menu)
-                    .transition(.opacity)
-                    .zIndex(2)
+            // The host wraps the *conditional*, not the menu: it has to outlive
+            // the panel for the glass to materialise in and out (see GlassHost).
+            GlassHost {
+                if let menu = model.menu {
+                    PlayerMenuView(model: menu, onBack: { model.closeMenu() })
+                        .transition(.opacity)
+                }
             }
+            .zIndex(2)
 
             // Shown independently of the controls: a skip prompt is useless if
             // it only appears while the transport happens to be up.

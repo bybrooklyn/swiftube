@@ -12,6 +12,13 @@ patterned on `../velachat`).
 - **`#Preview` and `@Entry` are unavailable** — those macro plugins ship with
   Xcode. `@Observable` works (`libObservationMacros.dylib` is in the CLT).
   Do not add a preview "just to check" a layout; it will not compile.
+- **Build against the 26 SDK with `--build-system native`.** The macOS 27 CLT
+  (Swift 6.4) defaults to the SwiftBuild backend, which needs `xcstringstool`
+  (Xcode-only) for `Localizable.xcstrings`, and its 27.0 SDK makes `@State` a
+  macro whose plugin is Xcode-only too — every `@State` in the app fails with
+  "plugin for module `SwiftUIMacros` not found". The justfile exports
+  `SDKROOT=…/MacOSX26.sdk` and passes the flag; `build-app.sh` does the same.
+  A bare `swift build` in this shell hits both walls.
 - **`swift test` does not work bare.** Swift Testing lives in
   `/Library/Developer/CommandLineTools/Library/Developer/Frameworks`, and the
   `_Testing_Foundation.framework` in there has an **empty Modules directory**, so

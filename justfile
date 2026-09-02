@@ -7,22 +7,35 @@ set shell := ["bash", "-c"]
 # is present but its Modules directory is empty in the CLT, so any test file
 # importing both Foundation and Testing fails to build without it.
 clt_frameworks := "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
+# Testing.framework in the macOS 27 CLT links `@rpath/lib_TestingInterop.dylib`,
+# which lives one directory over; without this rpath the bundle fails to dlopen.
+clt_testlib := "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
 test_flags := "-Xswiftc -F -Xswiftc " + clt_frameworks + \
               " -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlay-search" + \
               " -Xlinker -F -Xlinker " + clt_frameworks + \
-              " -Xlinker -rpath -Xlinker " + clt_frameworks
+              " -Xlinker -rpath -Xlinker " + clt_frameworks + \
+              " -Xlinker -rpath -Xlinker " + clt_testlib
+
+# The macOS 27 Command Line Tools (Swift 6.4) changed two things at once:
+# `swift build` now defaults to the SwiftBuild backend, which shells out to
+# `xcstringstool` for Localizable.xcstrings (Xcode-only), and the 27.0 SDK
+# declares `@State` as a macro whose plugin (SwiftUIMacros) is Xcode-only too.
+# The 26.5 SDK is still installed and the native backend needs no tool, so
+# every recipe builds that way. `Scripts/build-app.sh` does the same.
+export SDKROOT := "/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+build_flags := "--build-system native"
 
 default: build
 
 # Compile everything.
 build:
-    swift build
+    swift build {{build_flags}}
 
 check:
-    swift build
+    swift build {{build_flags}}
 
 build-release:
-    swift build -c release
+    swift build -c release {{build_flags}}
 
 # --no-parallel is required, not a preference: these suites are inherited from
 # SmartTubeIOS, where an Xcode test plan ran them serially. Several share global
@@ -31,7 +44,7 @@ build-release:
 
 # Run the full test suite (serially — see above).
 test:
-    swift test --no-parallel {{test_flags}}
+    swift test --no-parallel {{build_flags}} {{test_flags}}
 
 # One-time: create a stable local signing identity so the Keychain keeps trusting
 # the app (and your Google sign-in) across rebuilds.

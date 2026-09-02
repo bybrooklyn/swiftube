@@ -335,7 +335,7 @@ final class PlayerModel {
         cancelAutoHide()
     }
 
-    private func closeDescription() {
+    func closeDescription() {
         withAnimation(Theme.stateChange) { descriptionScroll = nil }
         focusedControl = .description
         showControls()
@@ -355,7 +355,7 @@ final class PlayerModel {
         }
     }
 
-    private func closeComments() {
+    func closeComments() {
         withAnimation(Theme.stateChange) { commentIndex = nil }
         focusedControl = .comments
         showControls()
@@ -422,7 +422,7 @@ final class PlayerModel {
         cancelAutoHide()
     }
 
-    private func closeMenu() {
+    func closeMenu() {
         menu = nil
         focusedControl = .settings
         showControls()

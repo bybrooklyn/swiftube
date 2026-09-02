@@ -54,24 +54,29 @@ struct RootView: View {
                 }
 
                 if let search = model.search {
-                    SearchView(model: search)
+                    SearchView(model: search, onBack: { model.closeSearch() })
                         .zIndex(3)
                 }
 
                 if let settings = model.settings {
-                    SettingsView(model: settings)
+                    SettingsView(model: settings, onBack: { model.closeSettings() })
                         .zIndex(3)
                 }
 
-                if model.isConfirmingSignOut {
-                    ConfirmDialog(
-                        title: "Sign out of YouTube?",
-                        detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
-                        symbol: "person.crop.circle.badge.xmark"
-                    )
-                    .transition(.opacity)
-                    .zIndex(4)
+                // Hosted outside the conditional so the dialog's glass
+                // materialises in and out rather than cutting (see GlassHost).
+                GlassHost {
+                    if model.isConfirmingSignOut {
+                        ConfirmDialog(
+                            title: "Sign out of YouTube?",
+                            detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
+                            symbol: "person.crop.circle.badge.xmark",
+                            onCancel: { model.cancelSignOut() }
+                        )
+                        .transition(.opacity)
+                    }
                 }
+                .zIndex(4)
 
                 if model.isSigningIn {
                     SignInView(auth: model.auth) { model.finishSignIn() }
@@ -96,6 +101,7 @@ struct RootView: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .clipped()
             .environment(\.viewportSize, geo.size)
+            .environment(\.liquidGlass, model.settingsStore.settings.liquidGlassEnabled)
             // The hidden titlebar still reserves a safe area, which pushed the
             // whole page down by ~34pt. A 10-foot UI owns the entire window.
             .ignoresSafeArea()
