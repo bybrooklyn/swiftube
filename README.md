@@ -144,5 +144,7 @@ SmartTubeIOS share global singletons and fail randomly when run concurrently.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE), which also carries the upstream notice for the
-SmartTube-derived code.
+GPL-3.0 — see [LICENSE](LICENSE). `Sources/YouTubeCore` and `Sources/YouTubeMedia` are
+ported from GPL-3.0-licensed code (bybrooklyn/SmartTubeIOS, forked from
+milika/SmartTubeIOS), and GPL-3.0's copyleft means the whole combined app is GPL-3.0
+too, not just those two directories.
