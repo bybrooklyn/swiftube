@@ -477,6 +477,14 @@ final class AppModel {
     }
 
     func openSearch() {
+        // Search, Settings and the card menu are all independent optionals
+        // that can otherwise end up non-nil at once (⌘K while Settings is
+        // open, say) — they all render at the same zIndex, so whichever
+        // declares later in RootView draws over and swallows input from the
+        // other, which looked like the app going unresponsive rather than
+        // like two screens stacked on each other.
+        settings = nil
+        cardMenu = nil
         isRailExpanded = false
         selectedRailItem = .search
         memory.railItem = .search
@@ -516,6 +524,9 @@ final class AppModel {
     }
 
     func openSettings() {
+        // See openSearch's note — these three can't be open at once.
+        search = nil
+        cardMenu = nil
         isRailExpanded = false
         settingsWasSignedIn = auth.isSignedIn
         settings = SettingsModel(store: settingsStore, auth: auth) { [weak self] in

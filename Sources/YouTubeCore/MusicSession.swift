@@ -143,16 +143,23 @@ public final class MusicSession {
     /// would see nothing happen.
     @discardableResult
     public func trackDidFinish() -> EndOfTrack {
-        if queue.repeatMode == .one, currentTrack != nil {
-            refillIfNeeded()
-            return .replayCurrent
-        }
-        guard let nextTrack = queue.advance() else {
+        // What track to land on is MusicQueue.advanceAfterPlayback's call
+        // (tested there) rather than re-decided here — this used to branch on
+        // repeatMode without ever calling it. Still checked here too, to
+        // choose .replayCurrent vs .play: a same-id result isn't a reliable
+        // signal on its own (repeat-all wrapping a one-track queue lands back
+        // on the same id without it being a repeat-one replay).
+        let repeatingOne = queue.repeatMode == .one && currentTrack != nil
+        guard let next = queue.advanceAfterPlayback() else {
             currentTrack = nil
             return .finished
         }
+        if repeatingOne {
+            refillIfNeeded()
+            return .replayCurrent
+        }
         didChangeTrack()
-        return .play(nextTrack)
+        return .play(next)
     }
 
     public func jump(toPlayPosition position: Int) {
