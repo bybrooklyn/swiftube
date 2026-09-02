@@ -54,6 +54,7 @@ public final class BrowseViewModel {
 
     private let api: any InnerTubeAPIProtocol
     private var fetchTask: Task<Void, Never>?
+    private var pageTask: Task<Void, Never>?
     private var enrichTask: Task<Void, Never>?
     /// When `false`, the History section returns empty content rather than fetching from YouTube.
     private var historyEnabled: Bool = true
@@ -85,15 +86,19 @@ public final class BrowseViewModel {
     // MARK: - Feed hide handling
 
     private func observeFeedHideNotifications() {
+        // A dead `self` ends the loop; `continue` kept the task alive for the
+        // life of the process, spinning on every hide notification.
         hideObserverTasks.append(Task { [weak self] in
             for await note in NotificationCenter.default.notifications(named: .hideVideoFromFeed) {
-                guard let self, let videoId = note.userInfo?["videoId"] as? String else { continue }
+                guard let self else { return }
+                guard let videoId = note.userInfo?["videoId"] as? String else { continue }
                 self.removeVideo(id: videoId)
             }
         })
         hideObserverTasks.append(Task { [weak self] in
             for await note in NotificationCenter.default.notifications(named: .hideChannelFromFeed) {
-                guard let self, let channelId = note.userInfo?["channelId"] as? String else { continue }
+                guard let self else { return }
+                guard let channelId = note.userInfo?["channelId"] as? String else { continue }
                 self.removeChannel(id: channelId)
             }
         })
@@ -193,6 +198,7 @@ public final class BrowseViewModel {
             }
         }
         fetchTask?.cancel()
+        pageTask?.cancel()
         fetchTask = Task { await fetchSection(target) }
     }
 
@@ -213,7 +219,11 @@ public final class BrowseViewModel {
         }
         browseLog.notice("loadMore triggered: section=\(currentSection.title) currentCount=\(videoGroups.first?.videos.count ?? 0)")
         isLoadingMore = true  // synchronous guard — prevents duplicate pagination tasks before the Task body runs
-        fetchTask = Task { await fetchNextPage(for: currentSection) }
+        // Its own handle: this used to overwrite `fetchTask`, so an in-flight
+        // section fetch lost the handle `select` cancels it through, and the
+        // pagination task itself was never cancelled by anything.
+        pageTask?.cancel()
+        pageTask = Task { await fetchNextPage(for: currentSection) }
     }
 
     /// Refreshes the current section's feed if the last successful fetch was more than
@@ -298,6 +308,55 @@ public final class BrowseViewModel {
         }
     }
 
+    /// The home feed for a signed-out session.
+    ///
+    /// Signed out, `FEwhat_to_watch` comes back empty — YouTube has no
+    /// recommendations to give without an identity. The fallback used to be a
+    /// single `search("popular")`, which is why the app showed one row of
+    /// generic results and called it home.
+    ///
+    /// These are YouTube's own category feeds instead: real, editorially
+    /// populated shelves with real names, fetched concurrently so the whole
+    /// feed costs about as long as its slowest row. It is not a substitute for
+    /// signing in — `isAuthRequired` is still set, and the UI says so — but it
+    /// is a genuine multi-shelf home rather than a search result.
+    private static func signedOutHome(api: any InnerTubeAPIProtocol) async -> [VideoGroup] {
+        let sources: [(String, @Sendable () async throws -> VideoGroup)] = [
+            ("Trending", { try await api.fetchLive() }),
+            ("Music",    { try await api.fetchMusic() }),
+            ("Gaming",   { try await api.fetchGaming() }),
+            ("News",     { try await api.fetchNews() }),
+            ("Sports",   { try await api.fetchSports() }),
+        ]
+
+        var rows = await withTaskGroup(of: (Int, VideoGroup?).self) { group in
+            for (index, source) in sources.enumerated() {
+                group.addTask {
+                    (index, try? await source.1())
+                }
+            }
+            var collected: [(Int, VideoGroup)] = []
+            for await (index, result) in group {
+                if let result, !result.videos.isEmpty { collected.append((index, result)) }
+            }
+            // The task group finishes out of order; the shelves must not.
+            return collected.sorted { $0.0 < $1.0 }.map { index, row -> VideoGroup in
+                var copy = row
+                copy.title = sources[index].0
+                copy.layout = .row
+                return copy
+            }
+        }
+
+        // The same video turns up in several category feeds; keep its first
+        // appearance so no shelf repeats what the one above it already showed.
+        var seen = Set<String>()
+        for index in rows.indices {
+            rows[index].videos = rows[index].videos.filter { seen.insert($0.id).inserted }
+        }
+        return rows.filter { !$0.videos.isEmpty }
+    }
+
     private func fetchSectionBody(_ section: BrowseSection) async throws {
         switch section.type {
 
@@ -306,10 +365,7 @@ public final class BrowseViewModel {
                 if !Task.isCancelled {
                     if rows.flatMap({ $0.videos }).isEmpty {
                         isAuthRequired = true
-                        let popular = try await api.search(query: "popular")
-                        var deduped = popular
-                        deduped.videos = deduplicated(popular.videos)
-                        videoGroups = [deduped]
+                        videoGroups = await Self.signedOutHome(api: api)
                     } else {
                         isAuthRequired = false
                         // Dedup within each row — YouTube can return the same video ID
@@ -363,13 +419,13 @@ public final class BrowseViewModel {
                         let popular = try await api.search(query: "popular")
                         browseLog.notice("Recommended: home feed empty, using search fallback (nextToken=\(popular.nextPageToken != nil))")
                         var deduped = popular
-                        deduped.videos = deduplicated(popular.videos)
+                        deduped.videos = popular.videos.deduplicatedByID()
                         videoGroups = [deduped]
                     } else {
                         isAuthRequired = false
                         recommendedUsesSearchFallback = false
                         var deduped = group
-                        deduped.videos = deduplicated(group.videos)
+                        deduped.videos = group.videos.deduplicatedByID()
                         videoGroups = [deduped]
                     }
                 }
@@ -380,7 +436,7 @@ public final class BrowseViewModel {
                     if !Task.isCancelled {
                         isAuthRequired = group.videos.isEmpty
                         var deduped = group
-                        deduped.videos = deduplicated(group.videos)
+                        deduped.videos = group.videos.deduplicatedByID()
                             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
                         videoGroups = deduped.videos.isEmpty ? [] : [deduped]
                     }
@@ -388,7 +444,7 @@ public final class BrowseViewModel {
                     let videos = await LocalSubscriptionFeedService.shared.fetchFeed(api: api)
                     if !Task.isCancelled {
                         isAuthRequired = false
-                        let deduped = deduplicated(videos)
+                        let deduped = videos.deduplicatedByID()
                             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
                         videoGroups = deduped.isEmpty ? [] : [VideoGroup(title: "Subscriptions", videos: deduped)]
                     }
@@ -478,6 +534,10 @@ public final class BrowseViewModel {
     private func fetchNextPage(for section: BrowseSection, autoChainDepth: Int = 0) async {
         guard let token = videoGroups.last?.nextPageToken else {
             browseLog.notice("fetchNextPage: no token for section=\(section.title) — skipping")
+            // `loadMoreIfNeeded` set this before the task ran; a refresh that
+            // replaced the groups in between left it stuck true, and no further
+            // page ever loaded for the session.
+            isLoadingMore = false
             return
         }
         browseLog.notice("fetchNextPage start: section=\(section.title) token=\(token.prefix(20))…")
@@ -665,12 +725,6 @@ public final class BrowseViewModel {
             videoGroups[0].videos.append(contentsOf: newVideos)
             videoGroups[0].nextPageToken = group.nextPageToken
         }
-    }
-
-    /// Returns `videos` with duplicate IDs removed, preserving first-occurrence order.
-    private func deduplicated(_ videos: [Video]) -> [Video] {
-        var seen = Set<String>()
-        return videos.filter { seen.insert($0.id).inserted }
     }
 
     // MARK: - Channel avatar enrichment

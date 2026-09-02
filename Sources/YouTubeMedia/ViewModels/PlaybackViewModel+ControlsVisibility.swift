@@ -47,8 +47,12 @@ extension PlaybackViewModel {
             : Double(settings.controlsHideTimeout)
         playerLog.debug("[controls] scheduleControlsHide — resetting \(timeout)s timer (landscape=\(self.isLandscape)), isScrubbing=\(self.isScrubbing)")
         controlsTimer?.cancel()
-        controlsTimer = Task {
+        // [weak self]: the task is stored on self, so capturing self strongly is a
+        // retain cycle — and the still-scrubbing branch below re-arms it, so it is a
+        // cycle with no natural end while `isScrubbing` is stuck true.
+        controlsTimer = Task { [weak self] in
             try? await Task.sleep(for: .seconds(timeout))
+            guard let self else { return }
             playerLog.debug("[controls] timer fired — isCancelled=\(Task.isCancelled) isScrubbing=\(self.isScrubbing)")
             guard !Task.isCancelled else {
                 playerLog.debug("[controls] hide suppressed (cancelled)")

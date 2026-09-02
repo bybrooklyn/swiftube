@@ -21,8 +21,25 @@ struct HLSPlaybackPolicy: Equatable, Sendable {
 
     static func resolve(label: String, isHLS: Bool) -> Self {
         guard isHLS else {
+            // A progressive (muxed/DASH) URL is signed for the client that asked
+            // for it, and the CDN checks the User-Agent against that signature.
+            // This branch used to hand back the iOS UA for every non-HLS URL
+            // whatever the client, so an `c=ANDROID_VR` muxed URL — the one
+            // client here that returns a plain playable MP4 — was fetched with
+            // the wrong UA and came back `HTTP 403: Forbidden`, while the same
+            // URL probed with the matching UA returned 206. Match the label.
+            let ua: String
+            if label.localizedCaseInsensitiveContains("androidvr") {
+                ua = InnerTubeClients.AndroidVR.userAgent
+            } else if label.localizedCaseInsensitiveContains("visionos") {
+                ua = InnerTubeClients.VisionOS.userAgent
+            } else if label.contains("WebSafari") {
+                ua = InnerTubeClients.WebSafari.userAgent
+            } else {
+                ua = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)"
+            }
             return Self(
-                userAgent: "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
+                userAgent: ua,
                 maximumHeight: nil,
                 filtersMasterManifest: false,
                 requiresH264: false
@@ -85,18 +102,60 @@ extension PlaybackViewModel {
     ///             Correct VR headers (nameID=28, Oculus UA on googleapis.com) are required.
     ///   Phase 4 — if all adaptive attempts fail, fall back to the Android muxed 360p stream.
     ///   The entire cycle repeats up to 3 times to survive transient network errors.
+    /// Wall-clock budget for one `exhaustiveRetry` run, across every rung.
+    ///
+    /// Generous enough that the rungs which actually work on macOS — VisionOS
+    /// HLS first, then the TV client — get their full chance, and short enough
+    /// that a video which is never going to play says so while the user is still
+    /// watching the screen.
+    static let retryLadderBudgetSeconds: Double = 45
+
     func exhaustiveRetry(video: Video, originalError: Error?, playerInfo: PlayerInfo? = nil, cached: CachedVideoData? = nil) async {
+        // Release the task handle when the ladder finishes. Nothing else did:
+        // only stop() and load() cleared `exhaustiveRetryTask`, so after the
+        // first stall-driven escalation the `== nil` guard in setupRateObserver
+        // stayed false for the rest of the video and every later stall loop was
+        // silently ignored. A cancelled run leaves the handle alone — whoever
+        // cancelled it has already replaced or cleared it.
+        defer { if !Task.isCancelled { exhaustiveRetryTask = nil } }
         // Testing override: --uitesting-force-stream-method restricts the retry to a
         // single named client so UI tests can probe one path at a time.
         if let method = StreamMethodProbeSupport.forcedStreamMethod {
             await probeStreamMethod(method, video: video)
             return
         }
-        #if os(tvOS)
-        // tvOS cannot use the WKWebView/BotGuard recovery available on iOS/macOS.
-        // Current yt-dlp uses VISIONOS as its primary JS-less Apple client. After
-        // seeding a normal YouTube webpage session it returns token-free HLS with
-        // H.264 through 1080p, which AVPlayer handles natively on Apple TV.
+        // An overall budget for the whole ladder.
+        //
+        // Every rung has its own timeout but there was no cap across them, and no
+        // backoff between the three attempt passes. Adding the documented
+        // per-rung budgets up gives a worst case around nine minutes of spinner
+        // before the give-up tail — dominated by two 40 s WebView extractions, a
+        // BotGuard wait, and three passes over seven clients. Past the deadline
+        // the remaining rungs are skipped and the user is told, which is a far
+        // better outcome than a spinner nobody will wait out.
+        //
+        // Checked at the rungs that cost real time, not on every line: a rung
+        // already in flight is allowed to finish, since it may be the one that
+        // works.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(Self.retryLadderBudgetSeconds))
+        func ladderExpired(_ phase: String) -> Bool {
+            guard ContinuousClock.now >= deadline else { return false }
+            playerLog.notice("[ladder] budget of \(Self.retryLadderBudgetSeconds)s exhausted before \(phase) — giving up")
+            return true
+        }
+
+        // VISIONOS is yt-dlp's primary JS-less Apple client: after seeding a
+        // normal YouTube webpage session it returns **token-free HLS** with
+        // H.264 through 1080p, which AVPlayer handles natively.
+        //
+        // This was `#if os(tvOS)`, added on the reasoning that tvOS cannot use
+        // the WKWebView/BotGuard recovery that iOS and macOS can. That reasoning
+        // held only while the macOS recovery worked. It does not: every path it
+        // offers ends in `rqh=1`, and rqh is enforced by *position* — playback
+        // dies at byte 3,276,800 whether the range is asked for by header or by
+        // query, on a re-signed URL, or with a minted `pot=` token. Token-free
+        // HLS has no such wall, and the one client that returns it was the one
+        // client compiled out of this build.
         do {
             let visionInfo = try await api.fetchPlayerInfoVisionOS(videoId: video.id)
             if await tryAllStreams(
@@ -112,7 +171,6 @@ extension PlaybackViewModel {
         } catch {
             playerLog.notice("[VisionOS] player request failed: \(error) — continuing legacy fallbacks")
         }
-        #endif
         // Phase -2: authenticated TV client, first.
         //
         // For a signed-in user this is the path most likely to work — the TV
@@ -134,12 +192,49 @@ extension PlaybackViewModel {
                     return
                 }
                 playerLog.notice("[TVAuth] streams failed — continuing recovery chain")
+
+                // Take the muxed stream now, not two minutes from now.
+                //
+                // There is already a muxed last resort, but it sits past three
+                // rounds of the whole recovery chain — measured here, roughly
+                // two minutes of black screen, which is indistinguishable from
+                // a broken app. Meanwhile this very response already carries a
+                // progressive itag-18 track with a plain URL that AVPlayer
+                // plays natively, and no other path on this machine has ever
+                // resolved a stream (rqh=1 stalls `loadTracks`, WEB comes back
+                // cipher-protected).
+                //
+                // So the trade is not "360p or 1080p", it is "360p now or a
+                // black screen": exactly the reasoning that moved TVAuth itself
+                // up to Phase -2. `tvInfo` is reused, so this costs no request.
+                // The chain below still runs when muxed is absent or fails.
+                if await tryAllStreams(video: video, info: tvInfo,
+                                       label: "TVAuth/muxed-early", skipMuxed: false) {
+                    playerLog.notice("[TVAuth/muxed-early] ✅ playing muxed stream — exhaustiveRetry done")
+                    return
+                }
+                playerLog.notice("[TVAuth/muxed-early] muxed unavailable — continuing recovery chain")
+
+                // TVAuth's muxed URL turns out to be a SABR URL (c=TVHTML5),
+                // which is not a playable MP4 — measured, not assumed. The
+                // ANDROID_VR response is the one that carries a genuine
+                // progressive itag-18 track with a plain URL, and it is already
+                // treated as rqh-exempt further down the chain. So ask it
+                // directly, still ahead of the long recovery race.
+                if let vrInfo = try? await api.fetchPlayerInfoAndroidVR(videoId: video.id),
+                   await tryAllStreams(video: video, info: vrInfo,
+                                       label: "AndroidVR/muxed-early", skipMuxed: false) {
+                    playerLog.notice("[AndroidVR/muxed-early] ✅ playing muxed stream — exhaustiveRetry done")
+                    return
+                }
+                playerLog.notice("[AndroidVR/muxed-early] muxed unavailable — continuing recovery chain")
             } catch {
                 playerLog.error("[TVAuth] player request failed: \(String(describing: error)) — continuing recovery chain")
             }
         }
 
         #if canImport(WebKit)
+        if ladderExpired("the cached-HLS shortcut") { return giveUp(video: video) }
         // Phase -1a: Cached WKWebView HLS URL shortcut — skip 5–9 s extraction when the
         // master manifest URL for this video was stored by a prior session or neighbour
         // pre-extraction. Falls through to live WKWebView extraction if the URL has expired
@@ -203,6 +298,8 @@ extension PlaybackViewModel {
                 await VideoPreloadCache.shared.invalidateWKHLSURL(for: video.id)
             }
         }
+        if ladderExpired("the BotGuard/WebView race") { return giveUp(video: video) }
+        startWebViewHLSExtractionIfNeeded(for: video.id)
         // Phase -2 + Phase -1b: race BotGuardWV adaptive path vs WKWebView HLS path.
         //
         // Both paths start simultaneously. They interleave cooperatively at every `await`
@@ -337,7 +434,9 @@ extension PlaybackViewModel {
             }
         }
         #endif
+        if ladderExpired("the client sweep") { return giveUp(video: video) }
         for attempt in 1...3 {
+            if attempt > 1, ladderExpired("retry pass \(attempt)") { return giveUp(video: video) }
             guard !Task.isCancelled else { return }
             retryAttempts = attempt
             isLoading = true
@@ -580,7 +679,16 @@ extension PlaybackViewModel {
         }
 
         playerLog.error("❌ All 3 retry attempts exhausted for \(video.id)")
+        giveUp(video: video)
+    }
+
+    /// The single place the ladder reports defeat, so an early exit on the budget
+    /// leaves exactly the state the exhausted path does — and `TVPlayerView` has
+    /// one thing to render.
+    private func giveUp(video: Video) {
+        playerLog.error("[ladder] giving up on \(video.id)")
         error = APIError.unavailable("Unable to play this video")
+        retryStatusMessage = "Tried every stream this client can use and none of them played."
         isLoading = false
     }
 
@@ -593,11 +701,12 @@ extension PlaybackViewModel {
     func racePathA(video: Video) async -> Bool {
         if !BotGuardWebViewRunner.shared.isReady {
             playerLog.notice("[BotGuardWV] waiting up to 6 s for minted token (race Path A)…")
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await BotGuardWebViewRunner.shared.prepare(for: video.id) }
-                group.addTask { try? await Task.sleep(nanoseconds: 6_000_000_000) }
-                _ = await group.next()
-                group.cancelAll()
+            // A real 6 s budget — `prepare` is bounded only by its own 45 s safety
+            // timer and honours no cancellation, so the task-group form this
+            // replaced could hold Path A open for the full 45.
+            let videoId = video.id
+            await withTimeout(seconds: 6) {
+                await BotGuardWebViewRunner.shared.prepare(for: videoId)
             }
         }
         guard !Task.isCancelled else { return false }
@@ -685,6 +794,7 @@ extension PlaybackViewModel {
                 proxyItem.audioTimePitchAlgorithm = .spectral
                 proxyItem.preferredForwardBufferDuration = 0.5
                 player.replaceCurrentItem(with: proxyItem)
+                installEndAndStallObservers(for: proxyItem)
                 itemObserverTask?.cancel()
                 for await st in proxyItem.statusStream {
                     guard !Task.isCancelled else { return false }
@@ -741,8 +851,27 @@ extension PlaybackViewModel {
     }
     #endif // canImport(WebKit)
 
+    /// Starts the WKWebView HLS extraction that Path B of the race awaits.
+    ///
+    /// This used to run from `loadAsync` on every load (and from `stop()` on
+    /// every Back), so the WebView session was paid for even when VisionOS
+    /// HLS — the path that actually plays on macOS — succeeded seconds earlier.
+    /// It now starts here, only once the ladder has reached the race. Reuses an
+    /// in-flight task for the same video when one exists.
+    #if canImport(WebKit)
+    func startWebViewHLSExtractionIfNeeded(for videoId: String) {
+        guard wkHLSEarlyTask == nil else { return }
+        wkHLSEarlyTaskVideoId = videoId
+        wkHLSEarlyTask = Task { @MainActor in
+            // priorityExtract bypasses pendingSerialTask chaining so wv.load()
+            // starts immediately rather than behind a background card extraction.
+            await YouTubeWebViewHLSExtractor.shared.priorityExtract(videoId: videoId)
+        }
+    }
+    #endif
+
     /// Path B of the exhaustiveRetry race: early WKWebView HLS path.
-    /// Awaits the `wkHLSEarlyTask` started in `loadAsync` (already in-flight).
+    /// Awaits the `wkHLSEarlyTask` started by `startWebViewHLSExtractionIfNeeded`.
     /// Returns `true` if a stream reached `readyToPlay`.
     #if canImport(WebKit)
     func racePathB(video: Video) async -> Bool {
@@ -1212,8 +1341,26 @@ extension PlaybackViewModel {
             let asset = qualityManager.makeHLSAsset(url: effectiveURL, options: uaOpts)
             playerLog.notice("[\(label)] HLS via AVURLAsset (native stack) url=\(effectiveURL.lastPathComponent)")
             item = AVPlayerItem(asset: asset)
+        } else if let proxied = YTProgressiveProxyLoader.makeAsset(
+            url: effectiveURL,
+            userAgent: hlsUA,
+            poToken: { [api, id = video.id] in await api.currentPoToken(for: id) },
+            renewURL: { [api, id = video.id] in
+                guard let fresh = try? await api.fetchPlayerInfoAndroidVR(videoId: id) else { return nil }
+                return fresh.formats.first { $0.mimeType.hasPrefix("video/mp4") && $0.url != nil }?.url
+            }
+        ) {
+            // Non-HLS (muxed / DASH) through the resource-loader proxy.
+            //
+            // `AVURLAssetHTTPHeaderFieldsKey` does not reach CoreMedia's network
+            // stack — the same gap `YTHLSProxyLoader` exists to close for HLS.
+            // Measured here: an itag-18 URL signed `c=ANDROID_VR` returned
+            // `HTTP 403: Forbidden` through AVURLAsset with the Oculus UA set in
+            // that option, and `206` through URLSession with the identical
+            // header. Owning the byte ranges is what makes the UA stick.
+            playerLog.notice("[\(label)] progressive via resource-loader proxy ua=\(hlsUA.prefix(28))")
+            item = AVPlayerItem(asset: proxied)
         } else {
-            // Non-HLS (muxed / DASH): direct AVURLAsset with iOS UA headers.
             let uaOpts: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": hlsHeaders]
             item = AVPlayerItem(asset: AVURLAsset(url: effectiveURL, options: uaOpts))
         }
@@ -1245,6 +1392,7 @@ extension PlaybackViewModel {
             return false
         }
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
 
         for await status in item.statusStream {
@@ -1570,6 +1718,7 @@ extension PlaybackViewModel {
                 return false
             }
             player.replaceCurrentItem(with: compositeItem)
+            installEndAndStallObservers(for: compositeItem)
             itemObserverTask?.cancel()
 
             for await status in compositeItem.statusStream {
@@ -1903,6 +2052,7 @@ extension PlaybackViewModel {
             isQualityChangePending = true
             isSwappingItem = true
             player.replaceCurrentItem(with: compositeItem)
+            installEndAndStallObservers(for: compositeItem)
             isSwappingItem = false
             itemObserverTask?.cancel()
 
@@ -2343,6 +2493,7 @@ extension PlaybackViewModel {
         }
         lastAttemptedStreamURL = masterURL
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
         for await status in item.statusStream {
             switch status {
@@ -2469,6 +2620,7 @@ extension PlaybackViewModel {
         }
 
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         for await status in item.statusStream {
             switch status {
             case .readyToPlay:
@@ -2610,6 +2762,7 @@ extension PlaybackViewModel {
             item?.preferredForwardBufferDuration = 0
         }
         player.replaceCurrentItem(with: item)
+        installEndAndStallObservers(for: item)
         itemObserverTask?.cancel()
         for await status in item.statusStream {
             switch status {

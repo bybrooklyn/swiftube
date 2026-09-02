@@ -82,14 +82,15 @@ extension PlaybackViewModel {
     }
 
     /// Play the most recently played video from the history stack.
-    /// Pops the last entry from history; load() will push the current video back so
-    /// the user can navigate forward again with playNext() or via suggestions.
+    /// Pops the last entry; `load()` is told not to push the current video
+    /// back, so repeated presses walk further back instead of alternating.
     public func playPrevious() {
         guard !history.isEmpty else { return }
         let prev = history.removeLast()
         hasPrevious = !history.isEmpty
         playerLog.notice("playPrevious: id=\(prev.id)")
         DiagnosticsLogger.setIntendedVideo(id: prev.id, title: prev.title)
+        isNavigatingBack = true
         load(video: prev)
     }
 

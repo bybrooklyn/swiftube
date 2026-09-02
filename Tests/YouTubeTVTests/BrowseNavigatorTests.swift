@@ -23,6 +23,68 @@ struct BrowseNavigatorTests {
         return current
     }
 
+    // MARK: - Channel header
+
+    /// A channel surface: same shelves, plus the Subscribe button between the
+    /// search bar and the first row.
+    private var channelLayout: BrowseLayout {
+        BrowseLayout(shelfSizes: [5, 3, 4], hasChannelHeader: true)
+    }
+
+    @Test("up from the top shelf reaches the channel header, not the search bar")
+    func upFromTopShelfReachesChannelHeader() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.card(shelf: 0, index: 2), [.up], layout: channelLayout, memory: &memory)
+        #expect(result == .topBar(.subscribe))
+    }
+
+    @Test("without a channel header, up from the top shelf still reaches search")
+    func upFromTopShelfReachesSearchWithoutHeader() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.card(shelf: 0, index: 2), [.up], layout: layout, memory: &memory)
+        #expect(result == .topBar(.search))
+    }
+
+    @Test("the header sits between the search bar and the shelves")
+    func headerSitsBetweenSearchAndShelves() {
+        var memory = BrowseNavigator.ColumnMemory()
+        // Up from the header continues to the search bar.
+        #expect(move(.topBar(.subscribe), [.up], layout: channelLayout, memory: &memory)
+                == .topBar(.search))
+        // And down from search stops at the header rather than skipping it.
+        var fresh = BrowseNavigator.ColumnMemory()
+        #expect(move(.topBar(.search), [.down], layout: channelLayout, memory: &fresh)
+                == .topBar(.subscribe))
+    }
+
+    @Test("down from the channel header enters the first shelf")
+    func downFromHeaderEntersShelf() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.topBar(.subscribe), [.down], layout: channelLayout, memory: &memory)
+        #expect(result == .card(shelf: 0, index: 0))
+    }
+
+    @Test("left from the channel header opens the guide")
+    func leftFromHeaderOpensGuide() {
+        var memory = BrowseNavigator.ColumnMemory()
+        let result = move(.topBar(.subscribe), [.left], layout: channelLayout, memory: &memory)
+        if case .rail = result {} else {
+            Issue.record("expected the guide, got \(result)")
+        }
+    }
+
+    @Test("up and back down through the header returns to the column it left")
+    func headerRoundTripKeepsColumn() {
+        var memory = BrowseNavigator.ColumnMemory()
+        // Arrive at the column by moving, the way the app does: `ColumnMemory`
+        // is written by `next`, so a focus placed directly is not remembered.
+        let start = move(.card(shelf: 0, index: 0), [.right, .right, .right],
+                         layout: channelLayout, memory: &memory)
+        #expect(start == .card(shelf: 0, index: 3))
+        let result = move(start, [.up, .down], layout: channelLayout, memory: &memory)
+        #expect(result == .card(shelf: 0, index: 3))
+    }
+
     // MARK: - Opening the guide
 
     @Test("left from the first card opens the guide rail")
@@ -220,5 +282,66 @@ struct BrowseNavigatorTests {
     func guideFocusSurvivesLayoutChange() {
         let empty = BrowseLayout(shelfSizes: [])
         #expect(BrowseNavigator.clamped(.rail(.subscriptions), to: empty) == .rail(.subscriptions))
+    }
+
+    // MARK: - Clamping from a shelf index past the end
+
+    // These are the cases `clamped` is actually called for: the focused shelf no
+    // longer exists because the surface changed under the user (Library's three
+    // shelves → a category's one). The backwards search used to subscript every
+    // index below the *old* shelf number against the *new*, shorter array.
+
+    @Test("a focused shelf past the end falls back to the last real shelf")
+    func focusPastTheEndFallsBack() {
+        let shrunk = BrowseLayout(shelfSizes: [3])
+        #expect(BrowseNavigator.clamped(.card(shelf: 2, index: 0), to: shrunk)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end skips empty shelves on the way back")
+    func focusPastTheEndSkipsEmptyShelves() {
+        let shrunk = BrowseLayout(shelfSizes: [4, 0])
+        #expect(BrowseNavigator.clamped(.card(shelf: 7, index: 3), to: shrunk)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end of an empty layout lands on the default")
+    func focusPastTheEndOfEmptyLayout() {
+        let empty = BrowseLayout(shelfSizes: [])
+        #expect(BrowseNavigator.clamped(.card(shelf: 3, index: 1), to: empty)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("a focused shelf past the end of an all-empty layout lands on the default")
+    func focusPastTheEndOfAllEmptyLayout() {
+        let allEmpty = BrowseLayout(shelfSizes: [0, 0])
+        #expect(BrowseNavigator.clamped(.card(shelf: 5, index: 0), to: allEmpty)
+                == .card(shelf: 0, index: 0))
+    }
+
+    // MARK: - Clamping the Subscribe button
+
+    @Test("subscribe focus survives while the channel header is up")
+    func subscribeSurvivesWithHeader() {
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: channelLayout)
+                == .topBar(.subscribe))
+    }
+
+    @Test("subscribe focus falls back to the search bar when the header goes away")
+    func subscribeFallsBackWhenHeaderGoes() {
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: layout)
+                == .topBar(.search))
+    }
+
+    @Test("subscribe focus falls back to the content when there is no top bar either")
+    func subscribeFallsBackWithoutTopBar() {
+        let bare = BrowseLayout(shelfSizes: [2], hasTopBar: false)
+        #expect(BrowseNavigator.clamped(.topBar(.subscribe), to: bare)
+                == .card(shelf: 0, index: 0))
+    }
+
+    @Test("the search bar still survives a layout change that keeps the top bar")
+    func searchSurvivesLayoutChange() {
+        #expect(BrowseNavigator.clamped(.topBar(.search), to: layout) == .topBar(.search))
     }
 }

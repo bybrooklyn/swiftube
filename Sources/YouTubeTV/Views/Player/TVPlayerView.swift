@@ -32,8 +32,34 @@ struct TVPlayerView: View {
                 ProgressView().controlSize(.large).tint(.white)
             }
 
+            // Captions sit under the chrome but over the video, and are drawn
+            // whether or not the transport is up — a subtitle that only appears
+            // while the control bar happens to be visible is not a subtitle.
+            CaptionOverlay(playback: model.playback,
+                           controlsVisible: model.areControlsVisible)
+
             if model.areControlsVisible {
                 overlay.transition(.opacity)
+            }
+
+            if model.isStatsVisible {
+                StatsOverlay(playback: model.playback)
+                    .padding(inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
+
+            if model.hasFailed {
+                PlaybackErrorPanel(playback: model.playback)
+                    .transition(.opacity)
+                    .zIndex(3)
+            }
+
+            if let menu = model.menu {
+                PlayerMenuView(model: menu)
+                    .transition(.opacity)
+                    .zIndex(2)
             }
 
             // Shown independently of the controls: a skip prompt is useless if
@@ -44,7 +70,11 @@ struct TVPlayerView: View {
             }
         }
         .animation(Theme.travel, value: model.areControlsVisible)
+        .animation(Theme.stateChange, value: model.isStatsVisible)
+        .animation(Theme.stateChange, value: model.hasFailed)
+        .animation(Theme.stateChange, value: model.isDescriptionOpen)
         .animation(Theme.stateChange, value: model.playback.currentToastSegment)
+        .animation(Theme.stateChange, value: model.menu == nil)
     }
 
     /// The SponsorBlock prompt, for categories set to "show toast" rather than
@@ -87,6 +117,21 @@ struct TVPlayerView: View {
             header
             Spacer(minLength: 0)
             footer
+        }
+        .overlay(alignment: .trailing) {
+            if model.isCommentsOpen {
+                CommentsPanel(model: model)
+                    .padding(.trailing, inset)
+                    .padding(.vertical, inset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if model.isDescriptionOpen {
+                // Same column as the comments — they are mutually exclusive, and
+                // sharing the position keeps the video's visible area constant.
+                DescriptionPanel(model: model)
+                    .padding(.trailing, inset)
+                    .padding(.vertical, inset)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
@@ -142,36 +187,18 @@ struct TVPlayerView: View {
             Scrubber(model: model)
                 .padding(.bottom, rem(0.5))
             transportRow
+            if model.isUpNextOpen {
+                UpNextRail(model: model)
+                    .padding(.top, rem(1.0))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        // KNOWN ISSUE: the scrubber still overruns the right edge and the
-        // transport's right-hand cluster lands off-screen. The cause is that a
-        // ZStack sizes to its largest child and the shelves behind the player
-        // are far wider than the window, so the proposal reaching here is too
-        // wide. Deriving an explicit width from `viewport` instead was worse —
-        // it measures zero on the first layout pass and the whole overlay
-        // vanishes. The real fix is to stop the shelves inflating the root's
-        // layout size (clipping does not change it), which is a change to
-        // ShelfListView, not here.
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, inset)
         .padding(.bottom, inset)
     }
 
-    /// Current position with the chapter name, and the total duration opposite —
-    /// the chapter name is what makes long videos navigable on a TV.
-    private var timeline: some View {
-        HStack {
-            Text(model.positionLabel)
-                .padding(.horizontal, rem(0.2))
-                .background(Color.black)
-            Spacer()
-            Text(formatDuration(model.playback.duration))
-                .padding(.horizontal, rem(0.2))
-                .background(Color.black)
-        }
-        .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .medium))
-        .foregroundStyle(Theme.textPrimary)
-    }
+    private var timeline: some View { TimelineLabels(model: model) }
 
     private var transportRow: some View {
         ZStack {
@@ -224,10 +251,12 @@ struct TVPlayerView: View {
     }
 
     private func pill(_ controls: [PlayerControl]) -> some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(controls, id: \.self) { pillButton($0) }
-            }
+        // No `GlassEffectContainer`, for the reason GuideRail.swift:47 spells out:
+        // it only earns its cost when its children apply `.glassEffect`, and none
+        // of these do — the pill is a flat `Theme.control` capsule. An empty
+        // container is a render pass for nothing.
+        HStack(spacing: 0) {
+            ForEach(controls, id: \.self) { pillButton($0) }
         }
         .background(Theme.control, in: .capsule)
     }
@@ -270,7 +299,36 @@ struct TVPlayerView: View {
     }
 }
 
-// MARK: - Scrubber
+// MARK: - Per-tick views
+
+/// Current position with the chapter name, and the total duration opposite —
+/// the chapter name is what makes long videos navigable on a TV.
+///
+/// Its own `View` rather than a computed property on `TVPlayerView` for a
+/// reason that matters: with `@Observable`, whichever body *reads*
+/// `playback.currentTime` is the body that gets invalidated when it changes.
+/// Read inline, that was `TVPlayerView.body` — so the title, the metadata, the
+/// whole transport row and both glass pills were rebuilt ten times a second
+/// while a video played, for a label that is the only thing that changed.
+private struct TimelineLabels: View {
+
+    @Bindable var model: PlayerModel
+    @Environment(\.viewportSize) private var viewport
+
+    var body: some View {
+        HStack {
+            Text(model.positionLabel)
+                .padding(.horizontal, Theme.Metrics.rem(0.2, viewport))
+                .background(Color.black)
+            Spacer()
+            Text(formatDuration(model.playback.duration))
+                .padding(.horizontal, Theme.Metrics.rem(0.2, viewport))
+                .background(Color.black)
+        }
+        .font(.system(size: Theme.Metrics.timeLabelSize(viewport), weight: .medium))
+        .foregroundStyle(Theme.textPrimary)
+    }
+}
 
 /// The progress bar: white played portion, chapter tick marks, and SponsorBlock
 /// segments coloured in place.
@@ -289,7 +347,9 @@ private struct Scrubber: View {
 
                 // SponsorBlock segments, drawn under the playhead so a skipped
                 // stretch is visible before you reach it.
-                ForEach(model.playback.sponsorSegments, id: \.start) { segment in
+                // Keyed on the segment's own id: two overlapping segments can
+                // share a start time, and `id: \.start` then dropped one.
+                ForEach(model.playback.sponsorSegments) { segment in
                     let x = CGFloat(segment.start / duration) * width
                     let w = CGFloat((segment.end - segment.start) / duration) * width
                     Capsule()

@@ -174,7 +174,7 @@ final class SearchModel {
             return
         }
         guard !Task.isCancelled else { return }
-        results = group.videos
+        results = group.videos.deduplicatedByID()
         if case let .result(index) = focus, index >= results.count {
             focus = results.isEmpty ? .key(0) : .result(0)
         }

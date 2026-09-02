@@ -23,6 +23,11 @@ public protocol InnerTubeAPIProtocol: AnyObject, Sendable {
     func fetchHistory(continuationToken: String?) async throws -> VideoGroup
     func fetchShorts() async throws -> VideoGroup
     func fetchShortsMore(continuationToken: String) async throws -> VideoGroup
+    /// The minted PO token for `videoId`, when one exists yet.
+    /// Defaulted to nil so existing conformances (test doubles) are unaffected.
+    func currentPoToken(for videoId: String) async -> String?
+    func subscribe(channelId: String) async throws
+    func unsubscribe(channelId: String) async throws
     func fetchMusic() async throws -> VideoGroup
     func fetchGaming() async throws -> VideoGroup
     func fetchNews() async throws -> VideoGroup
@@ -87,3 +92,9 @@ public extension InnerTubeAPIProtocol {
 // MARK: - InnerTubeAPI conformance
 
 extension InnerTubeAPI: InnerTubeAPIProtocol {}
+
+public extension InnerTubeAPIProtocol {
+    func currentPoToken(for videoId: String) async -> String? { nil }
+    func subscribe(channelId: String) async throws {}
+    func unsubscribe(channelId: String) async throws {}
+}

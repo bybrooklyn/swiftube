@@ -618,7 +618,11 @@ extension InnerTubeAPI {
                 }
                 let fps = f["fps"] as? Int ?? 30
                 let bitrate = f["bitrate"] as? Int
-                return VideoFormat(label: quality, width: width, height: height, fps: fps, mimeType: mimeType, url: url, bitrate: bitrate)
+                // HDR: PQ (SMPTE ST 2084) or HLG (ARIB STD-B67) transfer in colorInfo,
+                // or the label YouTube gives such formats ("1080p60 HDR").
+                let transfer = (f["colorInfo"] as? [String: Any])?["transferCharacteristics"] as? String ?? ""
+                let isHDR = transfer.contains("2084") || transfer.contains("B67") || quality.contains("HDR")
+                return VideoFormat(label: quality, width: width, height: height, fps: fps, mimeType: mimeType, url: url, bitrate: bitrate, isHDR: isHDR)
             }
         }
 
@@ -805,6 +809,13 @@ extension InnerTubeAPI {
     /// Appends extra query parameters to a YouTube stats URL and fires a fire-and-forget GET.
     /// Only adds parameters that are not already present in the base URL — preserving
     /// the `cpn`, `docid`, and other session params YouTube embedded in the tracking URL.
+    /// Host and path only — never the query string. See pingTrackingURL.
+    static func loggableEndpoint(_ url: URL) -> String {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = comps.host else { return "(unparseable url)" }
+        return host + comps.path
+    }
+
     private func pingTrackingURL(_ baseURL: URL, extraParams: [String: String]) async {
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         var items = comps?.queryItems ?? []
@@ -837,15 +848,19 @@ extension InnerTubeAPI {
         // view does not appear in the user's history). When c= and cver= in the URL
         // don't match what the server expects for the auth context, the server's body
         // is typically an "ok: false" / error code, but the HTTP status is still 200.
+        // Watch-history tracking URLs carry `cpn`, `ei` and `plid` — session
+        // identifiers that tie a log line to this playback session and account.
+        // The query was being logged in full, four times per video. Host and path
+        // are what actually tell you which endpoint was pinged.
         do {
             let (data, response) = try await session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                tubeLog.warning("pingTrackingURL: HTTP \(http.statusCode) for \(url.absoluteString.prefix(120), privacy: .public)")
+                tubeLog.warning("pingTrackingURL: HTTP \(http.statusCode) for \(Self.loggableEndpoint(url), privacy: .public)")
             } else {
                 let bodyPreview = String(data: data.prefix(200), encoding: .utf8)?
                     .replacingOccurrences(of: "\n", with: " ")
                     ?? "(non-utf8 \(data.count) bytes)"
-                tubeLog.notice("pingTrackingURL: ok — body=\(bodyPreview, privacy: .public) for \(url.absoluteString.prefix(120), privacy: .public)")
+                tubeLog.notice("pingTrackingURL: ok — body=\(bodyPreview, privacy: .public) for \(Self.loggableEndpoint(url), privacy: .public)")
             }
         } catch is CancellationError {
             // Task was cancelled (user navigated away) — expected, do not retry.
@@ -854,12 +869,12 @@ extension InnerTubeAPI {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    tubeLog.error("pingTrackingURL: retry HTTP \(http.statusCode) for \(url.absoluteString.prefix(120), privacy: .public)")
+                    tubeLog.error("pingTrackingURL: retry HTTP \(http.statusCode) for \(Self.loggableEndpoint(url), privacy: .public)")
                 } else {
                     let bodyPreview = String(data: data.prefix(200), encoding: .utf8)?
                         .replacingOccurrences(of: "\n", with: " ")
                         ?? "(non-utf8 \(data.count) bytes)"
-                    tubeLog.notice("pingTrackingURL: retry ok — body=\(bodyPreview, privacy: .public) for \(url.absoluteString.prefix(120), privacy: .public)")
+                    tubeLog.notice("pingTrackingURL: retry ok — body=\(bodyPreview, privacy: .public) for \(Self.loggableEndpoint(url), privacy: .public)")
                 }
             } catch {
                 tubeLog.error("pingTrackingURL: retry also failed — \(error.localizedDescription, privacy: .public)")

@@ -24,17 +24,18 @@ public enum PlayerControl: String, CaseIterable, Equatable, Hashable, Sendable {
     case stats
     case settings
 
-    func symbol(isPlaying: Bool, likeStatus: LikeStatus) -> String {
+    func symbol(isPlaying: Bool, likeStatus: LikeStatus,
+                isSubscribed: Bool = false, isSaved: Bool = false) -> String {
         switch self {
         case .description: "text.alignleft"
-        case .subscribe:   "bell"
+        case .subscribe:   isSubscribed ? "bell.fill" : "bell"
         case .previous:    "backward.end.fill"
         case .playPause:   isPlaying ? "pause.fill" : "play.fill"
         case .next:        "forward.end.fill"
         case .like:        likeStatus == .like ? "hand.thumbsup.fill" : "hand.thumbsup"
         case .dislike:     likeStatus == .dislike ? "hand.thumbsdown.fill" : "hand.thumbsdown"
         case .comments:    "text.bubble"
-        case .save:        "bookmark"
+        case .save:        isSaved ? "bookmark.fill" : "bookmark"
         case .stats:       "eye"
         case .settings:    "gearshape"
         }

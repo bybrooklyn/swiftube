@@ -22,7 +22,9 @@ if [[ "${1:-}" == "--release" ]]; then
 fi
 
 echo "▶ Building $APP_NAME ($CONFIG)…"
-swift build -c "$CONFIG" --package-path "$ROOT"
+# Native backend + macOS 26 SDK: see the note at the top of the justfile.
+export SDKROOT="${SDKROOT:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk}"
+swift build -c "$CONFIG" --build-system native --package-path "$ROOT"
 
 BIN="$ROOT/.build/$CONFIG/$EXECUTABLE"
 APP="$ROOT/build/$APP_NAME.app"
@@ -64,7 +66,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.entertainment</string>
     <key>NSHumanReadableCopyright</key>
-    <string>GPL-3.0. Derived from SmartTubeIOS. Not affiliated with YouTube or Google.</string>
+    <string>MIT. Derived from SmartTubeIOS. Not affiliated with YouTube or Google.</string>
 </dict>
 </plist>
 PLIST
@@ -128,12 +130,18 @@ fi
 # that created it. Ad-hoc signing (`codesign --sign -`) hashes the binary into
 # the identity, so every rebuild would look like a different app and re-prompt.
 IDENTITY="YouTube Local Dev"
+# Errors here are fatal, and stderr is kept. Both calls used to end
+# `>/dev/null 2>&1 || true`, so a locked keychain or a revoked identity produced
+# a cheerful "✅ Built" and an unsigned bundle — which is precisely the state
+# that silently invalidates the stored OAuth tokens this signing exists to protect.
 if security find-certificate -c "$IDENTITY" "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then
-  codesign --force --deep --sign "$IDENTITY" "$APP" >/dev/null 2>&1 || true
+  codesign --force --deep --sign "$IDENTITY" "$APP"
 else
   echo "  note: signing ad-hoc — run \`just setup-signing\` once to stop Keychain re-prompts."
-  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  codesign --force --deep --sign - "$APP"
 fi
+# And prove the signature is actually valid, rather than trusting the exit code.
+codesign --verify --strict "$APP"
 
 echo "✅ Built $APP"
 echo "   Launch with: open \"$APP\""

@@ -16,6 +16,14 @@ struct RootView: View {
                     TopBar(focus: model.focus,
                            accountAvatarURL: model.auth.accountAvatarURL,
                            isPremium: false)
+                    if let channel = model.channelHeader {
+                        ChannelHeader(channel: channel,
+                                      isFocused: model.focus == .topBar(.subscribe),
+                                      onSelect: { model.toggleSubscription() })
+                            .padding(.horizontal, Theme.Metrics.contentInset(geo.size))
+                            .padding(.bottom, Theme.Metrics.rem(1.25, geo.size))
+                            .transition(.opacity)
+                    }
                     ShelfListView(model: model)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
@@ -35,10 +43,14 @@ struct RootView: View {
                           selected: model.selectedRailItem,
                           channels: model.guideChannels,
                           accountName: model.auth.accountName,
-                          accountAvatarURL: model.auth.accountAvatarURL)
+                          accountAvatarURL: model.auth.accountAvatarURL,
+                          onHover: { model.hover(rail: $0) },
+                          onSelect: { model.click(rail: $0) })
 
                 if model.isLoading {
                     loadingState.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let empty = model.emptyState {
+                    SurfaceMessage(title: empty.title, detail: empty.detail, symbol: empty.symbol)
                 }
 
                 if let search = model.search {
@@ -49,6 +61,16 @@ struct RootView: View {
                 if let settings = model.settings {
                     SettingsView(model: settings)
                         .zIndex(3)
+                }
+
+                if model.isConfirmingSignOut {
+                    ConfirmDialog(
+                        title: "Sign out of YouTube?",
+                        detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
+                        symbol: "person.crop.circle.badge.xmark"
+                    )
+                    .transition(.opacity)
+                    .zIndex(4)
                 }
 
                 if model.isSigningIn {
@@ -62,6 +84,7 @@ struct RootView: View {
                         .zIndex(1)
                 }
             }
+            .overlay(alignment: .topLeading) { TrafficLights() }
             // Pinned to the window, and clipped.
             //
             // A ZStack takes the size of its largest child, and the shelf rows

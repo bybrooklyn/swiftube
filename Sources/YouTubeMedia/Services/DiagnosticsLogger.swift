@@ -47,6 +47,25 @@ struct DiagnosticsLogger: Sendable {
         logger.debug("\(msg, privacy: .public)")
     }
 
+    // MARK: - Redacted variants
+    //
+    // `notice`/`error`/`debug` above force `privacy: .public`, which is right for
+    // the playback pipeline — CLAUDE.md's `log stream` workflow depends on those
+    // lines being readable, and none of them carry anything about the account.
+    // It is wrong for anything that names or identifies the user. Use these
+    // instead there: the message is redacted in the unified log, so it survives a
+    // `log collect` or a sysdiagnose without carrying the account with it.
+
+    func noticeSensitive(_ message: @autoclosure () -> String) {
+        let msg = message()
+        logger.notice("\(msg, privacy: .private)")
+    }
+
+    func errorSensitive(_ message: @autoclosure () -> String) {
+        let msg = message()
+        logger.error("\(msg, privacy: .private)")
+    }
+
     func recordNonFatal(_ error: Error, userInfo: [String: String] = [:]) {
         let nsError = error as NSError
         var msg = "[\(category)] \(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription)"

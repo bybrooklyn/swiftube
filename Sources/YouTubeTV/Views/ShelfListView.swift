@@ -31,7 +31,20 @@ struct ShelfListView: View {
 
         VStack(alignment: .leading, spacing: Theme.Metrics.shelfGap(viewport)) {
             ForEach(Array(shelves.enumerated()), id: \.element.id) { index, shelf in
-                ShelfRow(shelf: shelf, shelfIndex: index, isHero: index == 0, model: model)
+                // Only rows near the parked one build their cards.
+                //
+                // Nothing here is virtualised — the whole feed is one VStack
+                // translated vertically — so without this every shelf kept ten
+                // live cards, each with a decoded thumbnail and five text runs.
+                // At ten shelves that is a hundred cards being re-laid-out on
+                // every focus change, which is what made moving along a row
+                // drop frames. A parked row is the only one fully on screen and
+                // its neighbours are the only ones that can scroll into view.
+                ShelfRow(shelf: shelf,
+                         shelfIndex: index,
+                         isHero: index == 0,
+                         buildsCards: abs(index - parkedRow) <= 2,
+                         model: model)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,6 +62,9 @@ private struct ShelfRow: View {
     let shelf: AppModel.Shelf
     let shelfIndex: Int
     let isHero: Bool
+    /// False for rows too far from the parked one to be seen — they reserve
+    /// their height and draw nothing, so the feed costs what is on screen.
+    let buildsCards: Bool
     @Bindable var model: AppModel
     @Environment(\.viewportSize) private var viewport
 
@@ -79,12 +95,24 @@ private struct ShelfRow: View {
                 .animation(Theme.stateChange, value: isActive)
                 .padding(.leading, inset)
 
-            if shelf.videos.isEmpty {
+            if !buildsCards {
+                // Same height as `cards`, so the vertical offsets that park a
+                // row stay correct whether or not the row is built.
+                Color.clear.frame(height: rowHeight)
+            } else if shelf.videos.isEmpty {
                 placeholder
             } else {
                 cards
             }
         }
+    }
+
+    /// Height of the card block — thumbnail, the gap, and the metadata.
+    private var rowHeight: CGFloat {
+        let width = Theme.Metrics.cardWidth(viewport, hero: isHero)
+        return width / Theme.Metrics.cardAspect
+            + Theme.Metrics.thumbToMeta(viewport)
+            + Theme.Metrics.metaBlockHeight(viewport)
     }
 
     private var cards: some View {
@@ -108,33 +136,41 @@ private struct ShelfRow: View {
         // layout size. An overlay does not contribute to its parent's size at
         // all, which is exactly the property needed here.
         return Color.clear
-            .frame(height: width / Theme.Metrics.cardAspect
-                   + Theme.Metrics.thumbToMeta(viewport)
-                   + Theme.Metrics.metaBlockHeight(viewport))
+            .frame(height: rowHeight)
             .overlay(alignment: .topLeading) {
                 HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
                     ForEach(window, id: \.element.id) { index, video in
                         VideoCard(video: video,
                                   isFocused: model.isFocused(shelf: shelfIndex, index: index),
                                   isHero: isHero)
+                            .onHover { inside in
+                                if inside { model.hover(shelf: shelfIndex, index: index) }
+                            }
+                            .onTapGesture { model.click(shelf: shelfIndex, index: index) }
                     }
                 }
                 .offset(x: -CGFloat(parked) * step)
                 .fixedSize()
             }
-        // Order matters: pad first so the cards sit at the content inset, then
-        // mask in that same padded space so nothing draws to the left of it.
-        // Masking before padding clips in the *unpadded* space and then shifts
-        // the result right, which eats the leading inset off the first card.
+        // Pad first so the cards sit at the content inset, then clip in that
+        // same padded space so nothing draws to the left of it.
         //
-        // The vertical over-expansion keeps only the horizontal edges clipping,
-        // so a focused card's ring is never squared off top or bottom.
+        // The clip is pulled back by `focusRingInset`, because the focused
+        // card's ring is drawn *outside* the thumbnail by exactly that much.
+        // Clipping at the card edge sliced the ring's left side off, which read
+        // as the selection running into the sidebar. Pulled back it still stops
+        // 0.5rem clear of the collapsed rail, so nothing is drawn under it.
+        //
+        // A rectangular `clipShape` rather than `.mask(Rectangle())`: a mask is
+        // an alpha composite, so every row rendered its whole strip of cards
+        // into an offscreen buffer and blended it back on each frame. Ten rows
+        // of that is pure cost for a clip that is axis-aligned anyway.
+        //
+        // The shape overflows vertically so only the horizontal edges clip and
+        // a focused card's ring is never squared off top or bottom.
         .padding(.leading, inset)
-        .mask(
-            Rectangle()
-                .padding(.leading, inset)
-                .padding(.vertical, -viewport.height)
-        )
+        .clipShape(ShelfClip(leading: inset - Theme.Metrics.focusRingInset(viewport),
+                             verticalOverflow: viewport.height))
         .animation(Theme.travel, value: parked)
     }
 
@@ -149,5 +185,19 @@ private struct ShelfRow: View {
         }
         .padding(.leading, inset)
         .redacted(reason: .placeholder)
+    }
+}
+
+/// Clips a shelf to the content inset horizontally while letting it overflow
+/// vertically, so a focused card's ring is not squared off top or bottom.
+private struct ShelfClip: Shape {
+    let leading: CGFloat
+    let verticalOverflow: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX + leading,
+                    y: rect.minY - verticalOverflow,
+                    width: max(rect.width - leading, 0),
+                    height: rect.height + verticalOverflow * 2))
     }
 }

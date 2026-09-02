@@ -25,10 +25,16 @@ private final class MockQualityDelegate: QualityContext, QualityEventHandler {
     var settings = AppSettings()
     var currentVideo: Video? = nil
     var currentTime: TimeInterval = 0
+    var isPlaying = true
     var toastMessage: String? = nil
     var isSwappingItem = false
     var isQualityChangePending = false
     func qualityItemDidBecomeReady(_ item: AVPlayerItem, seekTo: TimeInterval) {}
+
+    /// Items the manager asked us to re-observe. A quality switch replaces the
+    /// player item, so the end-of-item and stall observers have to move with it.
+    private(set) var observedItems: [AVPlayerItem] = []
+    func installEndAndStallObservers(for item: AVPlayerItem, endsQualityTransition: Bool) { observedItems.append(item) }
     func qualityItemDidFail(error: Error?, quality: AppSettings.VideoQuality, hasAppliedH264Cap: Bool) async {}
     func qualitySelectDASHFormat(videoURL: URL, audioURL: URL, seekTo: TimeInterval) async {}
 }
@@ -65,6 +71,20 @@ struct PerVideoQualityOverrideTests {
         #expect(mgr.perVideoQuality == .q720)
         #expect(delegate.settings.preferredQuality == .q480)
         #expect(mgr.effectiveQuality == .q720)
+    }
+
+    @Test("A switch started while paused does not resume playback")
+    @MainActor
+    func pausedSwitchStaysPaused() {
+        let (mgr, delegate) = makeManager(default: .auto)
+        delegate.isPlaying = false
+        mgr.selectFormat(makeFormat(height: 720))
+        #expect(mgr.resumeAfterSwitch == false)
+        delegate.isPlaying = true
+        mgr.selectFormat(makeFormat(height: 480))
+        #expect(mgr.resumeAfterSwitch == true)
+        mgr.reset()
+        #expect(mgr.resumeAfterSwitch == true)
     }
 
     @Test("Explicitly picking Auto overrides a non-auto default")

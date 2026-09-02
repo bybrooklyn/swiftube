@@ -90,6 +90,19 @@ public enum BrowseNavigator {
 
         // MARK: Top bar
         case let .topBar(item):
+            if item == .subscribe {
+                switch direction {
+                case .left:
+                    return .rail(memory.railItem)
+                case .right:
+                    return focus
+                case .up:
+                    return layout.hasTopBar ? .topBar(.search) : focus
+                case .down:
+                    guard let shelf = layout.firstFocusableShelf else { return focus }
+                    return .card(shelf: shelf, index: memory.index(forShelf: shelf, layout: layout))
+                }
+            }
             switch direction {
             case .left:
                 // Straight to the guide. There is no avatar in the top bar to
@@ -101,6 +114,7 @@ public enum BrowseNavigator {
             case .right:
                 return focus
             case .down:
+                if layout.hasChannelHeader { return .topBar(.subscribe) }
                 guard let shelf = layout.firstFocusableShelf else { return focus }
                 return .card(shelf: shelf, index: memory.index(forShelf: shelf, layout: layout))
             case .up:
@@ -119,7 +133,9 @@ public enum BrowseNavigator {
                 if let above = previousFocusableShelf(before: shelf, layout: layout) {
                     return .card(shelf: above, index: memory.index(forShelf: above, layout: layout))
                 }
-                // Above the topmost shelf sits the search bar.
+                // Above the topmost shelf sits the channel header when there
+                // is one, and the search bar otherwise.
+                if layout.hasChannelHeader { return .topBar(.subscribe) }
                 return layout.hasTopBar ? .topBar(.search) : focus
             case .down:
                 if let below = nextFocusableShelf(after: shelf, layout: layout) {
@@ -152,8 +168,15 @@ public enum BrowseNavigator {
         switch focus {
         case .rail:
             return focus
-        case .topBar:
+        case .topBar(.search):
             return layout.hasTopBar ? focus : defaultContentFocus(layout: layout)
+        case .topBar(.subscribe):
+            // Subscribe is only drawn while a channel header is up, and the header
+            // goes away whenever the surface changes underneath the user. Checking
+            // hasTopBar alone left focus on an element nothing renders — a frame
+            // with no highlight anywhere. `resolve` already gets this right.
+            if layout.hasChannelHeader { return focus }
+            return layout.hasTopBar ? .topBar(.search) : defaultContentFocus(layout: layout)
         case let .card(shelf, index):
             if layout.isFocusable(shelf: shelf) {
                 return .card(shelf: shelf, index: min(index, layout.shelfSizes[shelf] - 1))
@@ -172,7 +195,14 @@ public enum BrowseNavigator {
     }
 
     private static func previousFocusableShelf(before shelf: Int, layout: BrowseLayout) -> Int? {
-        guard shelf > 0 else { return nil }
-        return (0..<shelf).reversed().first { layout.shelfSizes[$0] > 0 }
+        // `shelf` arrives from `clamped`, which is called precisely when the focused
+        // index no longer fits the layout — so it can be past the end of the array.
+        // `nextFocusableShelf` bounds itself against `count`; this one only checked
+        // `> 0` and then subscripted every index below `shelf`, which traps.
+        // Reachable for real: park on the third Library shelf, then open a surface
+        // that collapses to one — `layoutDidChange` runs straight into it.
+        let upperBound = min(shelf, layout.shelfSizes.count)
+        guard upperBound > 0 else { return nil }
+        return (0..<upperBound).reversed().first { layout.shelfSizes[$0] > 0 }
     }
 }

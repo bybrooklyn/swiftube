@@ -87,6 +87,10 @@ extension PlaybackViewModel {
     }
 
     public func setPlaybackSpeed(_ speed: Double) {
+        // Every rate-restore path (stall recovery, hold-speed end, quality
+        // switch, loop) reads `settings.playbackSpeed`; without this line each
+        // of them snapped the speed back to whatever Settings last saved.
+        settings.playbackSpeed = speed
         // Setting player.rate to a non-zero value on a paused AVPlayer restarts
         // playback — only apply the rate while actively playing.
         if isPlaying {

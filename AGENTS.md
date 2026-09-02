@@ -21,7 +21,7 @@ patterned on `../velachat`).
 - **`--no-parallel` is load-bearing.** The suites inherited from SmartTubeIOS
   share global singletons (`CurrentQueueStore`, the UserDefaults-backed stores).
   Run in parallel they fail a different random 1–4 tests every time, which looks
-  exactly like a real regression. Serially, all 803 pass, repeatably.
+  exactly like a real regression. Serially, all 904 pass, repeatably.
 
 ## Launching and verifying
 
@@ -74,40 +74,57 @@ something. Four classes of change were needed and are worth knowing about:
    `os.Logger` behind it.
 4. **Genuine macOS-specific defects** (see below).
 
-## Playback: where it stands
+## Playback: how it works, and the trap under it
 
-Playback **does not yet resolve a stream**. Three real defects were found and
-fixed on the way there; none of them alone unblocks it:
+Playback works: **VISIONOS + HLS, 1080p**. If you are changing the playback
+pipeline, know why that is the path, because every other one is a dead end.
 
-- **`requiresDecryption` was a dead end.** `parsePlayerInfo` throws when every
-  format URL is cipher-protected, and its own comment says it does so "so the
-  caller's fallback chain fires" — but the catch in `loadAsync` only routed
-  `signInRequired` and `httpError(403)`, so a cold start (PO token not yet
-  minted) surfaced an error instead of retrying. Now a distinct `APIError` case
-  routed to `exhaustiveRetry`.
-- **`visitorData` was being wiped every ~5 seconds.** `handlePathUpdate` cleared
-  it on any satisfied→satisfied `NWPathMonitor` update. A Mac has several
-  interfaces up at once and reports those constantly; iOS, with one, is quiet —
-  so this was invisible upstream. Now compares actual interface identity.
-- **Browse and playback had separate sessions.** `HomeViewModel` and
-  `PlaybackViewModel` each defaulted to their own `InnerTubeAPI`, each with its
-  own `visitorData` — the identity a PO token is bound to. The player's had none
-  at all. `AppModel` now owns one and injects it.
+`rqh=1` on a googlevideo URL is enforced **by position**. A signed progressive
+URL serves a free budget — measured on this machine, exactly 3,276,800 bytes,
+about 60 seconds — and then answers `403` for every range past it. That wall
+does not move for:
 
-What the logs show now: BotGuard succeeds and mints a 164-byte token, the
-fallback chain runs through every client, and YouTube still returns
-cipher-protected URLs — answering one client with "Sign in to confirm you're not
-a bot". **The next step is wiring the device-code OAuth flow in
-`YouTubeMedia/Services/AuthService+DeviceFlow.swift` to a sign-in screen**, not
-more work on stream extraction.
+- a `Range:` header, or a `range=` query parameter;
+- a freshly re-signed URL from a new `/player` response;
+- a BotGuard-minted `pot=` token (it is bound to the WEB visitor session, not
+  to the ANDROID_VR one the URL belongs to).
+
+All four were tried and all four were refused at the same offset. Getting past
+it with progressive bytes means implementing SABR (`serverAbrStreamingUrl`),
+which is its own project.
+
+HLS sidesteps it entirely — segments are short and independently signed — and
+the client that hands out a **token-free** HLS manifest is VISIONOS, seeded
+first with an ordinary watch-page session (`seedVisionOSSession`). It is tried
+at the top of `exhaustiveRetry`.
+
+Two things worth not re-learning:
+
+- **`AVURLAssetHTTPHeaderFieldsKey` does not reach CoreMedia's network stack.**
+  A URL signed `c=ANDROID_VR` returns 403 through `AVURLAsset` with the Oculus
+  UA set in that option, and 206 through `URLSession` with the identical header.
+  That gap is what `YTHLSProxyLoader` closes for HLS and
+  `YTProgressiveProxyLoader` closes for progressive MP4.
+- **`HLSPlaybackPolicy.resolve` picks the UA from the label.** Its non-HLS
+  branch used to return the iOS UA for every client, which 403s any URL signed
+  for a different one.
+
+The progressive path survives as a fallback and still hits the 60-second wall by
+nature. If VisionOS ever stops returning HLS, that is what you will land on, and
+the symptom will be playback that dies after a minute.
 
 ## UI conventions
 
 - Focus logic belongs in `Sources/YouTubeTV/Focus/`, as pure functions over value
   types, with tests. Views render `focus`; they never decide where it goes next.
-- One spring — `Theme.focusSpring` — for every focus transition. A second curve
-  makes the surface read as several objects instead of one.
-- `.glassEffect(.clear, …)` is **not** "no glass"; it still draws a glass shape.
-  Apply the modifier conditionally instead (see `RailGlass`).
+- Two curves, and only two: `Theme.stateChange` (0.15 s ease-out) for a focus ring
+  or a colour change, `Theme.travel` (0.3 s) for a row or column actually moving.
+  Mixing in a third makes the surface read as several objects instead of one.
+  (An earlier version of this file named `Theme.focusSpring`, `.glassEffect` and
+  `RailGlass`. None of those survived the rebuild in `f27381e` — do not go looking
+  for them.)
+- Liquid Glass is available but is used sparingly, and never as an empty wrapper:
+  `GlassEffectContainer` only earns its render pass when a child actually applies
+  `.glassEffect`. See the note at `GuideRail.swift:47`.
 - Do not put full-width glass over playing video. The player's control bar uses a
   gradient scrim and keeps glass for the small button cluster.
