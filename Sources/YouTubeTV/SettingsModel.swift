@@ -91,6 +91,21 @@ final class SettingsModel {
                 $0.seekForwardSeconds = $1
             }
         })
+        rows.append(Row(id: "pb.background", kind: .setting, title: "Keep playing in the background",
+                        value: settings.backgroundPlaybackEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.backgroundPlaybackEnabled.toggle() }
+        })
+
+        rows.append(Row(id: "h.downloads", kind: .header, title: "Downloads"))
+        rows.append(Row(id: "dl.limit", kind: .setting, title: "Download limit",
+                        value: "\(settings.downloadLimitGB) GB") { [weak self] in
+            self?.cycle(Self.downloadLimitOptions, current: { $0.downloadLimitGB }) {
+                $0.downloadLimitGB = $1
+            }
+        })
+        let stored = DownloadStore.shared
+        rows.append(Row(id: "dl.used", kind: .setting, title: "Stored",
+                        value: "\(stored.entries.count) videos · \(Self.gigabytes(stored.totalBytes))"))
 
         rows.append(Row(id: "h.content", kind: .header, title: "Content"))
         rows.append(Row(id: "c.shorts", kind: .setting, title: "Hide Shorts",
@@ -182,6 +197,12 @@ final class SettingsModel {
     /// Short segments are usually mislabelled, so skipping them is more
     /// annoying than leaving them in.
     private static let minSegmentOptions: [Double] = [0, 1, 2, 3, 5, 10]
+
+    private static let downloadLimitOptions: [Int] = [2, 5, 10, 20, 50]
+
+    static func gigabytes(_ bytes: Int64) -> String {
+        String(format: "%.1f GB", Double(bytes) / 1_000_000_000)
+    }
 
     // MARK: - Labels
 

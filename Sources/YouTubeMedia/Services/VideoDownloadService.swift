@@ -163,13 +163,15 @@ public final class VideoDownloadService {
 
     private func performDownload(video: Video) async {
         do {
+            // macOS port: there is no Photos step — the file goes straight to
+            // DownloadStore, which is what the Library's Downloads row reads.
+            #if os(iOS)
             guard await requestPhotoAddAccess() else {
                 state = .failed("Photo library access is required to save the video")
-                #if os(iOS)
                 if #available(iOS 16.1, *) { await endLiveActivity(phase: .failed) }
-                #endif
                 return
             }
+            #endif
 
             if let tempURL = await tryDirectDownload(videoId: video.id) {
                 downloadLog.notice("[download] remuxing for Photos compatibility")
@@ -179,7 +181,9 @@ public final class VideoDownloadService {
                 let photosURL = try await passthroughRemux(inputURL: tempURL, videoId: video.id, suffix: "muxed")
                 try? FileManager.default.removeItem(at: tempURL)
                 state = .saving
+                #if os(iOS)
                 try await saveToPhotoLibrary(fileURL: photosURL)
+                #endif
                 storeInDownloadStore(video: video, mergedFileURL: photosURL)
                 try? FileManager.default.removeItem(at: photosURL)
                 downloadLog.notice("[download] ✅ saved to Photos \(video.id)")
@@ -216,8 +220,8 @@ public final class VideoDownloadService {
             state = .saving
             #if os(iOS)
             if #available(iOS 16.1, *) { await updateLiveActivity(phase: .saving, progress: 1) }
-            #endif
             try await saveToPhotoLibrary(fileURL: mergedURL)
+            #endif
             storeInDownloadStore(video: video, mergedFileURL: mergedURL)
             try? FileManager.default.removeItem(at: mergedURL)
             downloadLog.notice("[download] ✅ adaptive merge saved to Photos \(video.id)")
@@ -479,6 +483,10 @@ public final class VideoDownloadService {
             try fm.copyItem(at: mergedFileURL, to: destURL)
         } catch {
             downloadLog.notice("[download] DownloadStore copy failed for \(video.id): \(error.localizedDescription)")
+            #if !os(iOS)
+            // With no Photos copy, the store *is* the download: say so.
+            state = .failed("Could not save the download: \(error.localizedDescription)")
+            #endif
             return
         }
         DownloadStore.shared.add(DownloadedVideo(

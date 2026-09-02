@@ -24,6 +24,8 @@ public enum PlayerControl: String, CaseIterable, Equatable, Hashable, Sendable {
     /// Save to a playlist other than Watch Later — opens the picker.
     case addToPlaylist
     case stats
+    /// Picture in picture: the video into its own floating window.
+    case pip
     case settings
 
     func symbol(isPlaying: Bool, likeStatus: LikeStatus,
@@ -40,6 +42,7 @@ public enum PlayerControl: String, CaseIterable, Equatable, Hashable, Sendable {
         case .save:        isSaved ? "bookmark.fill" : "bookmark"
         case .addToPlaylist: "text.badge.plus"
         case .stats:       "eye"
+        case .pip:         "pip.enter"
         case .settings:    "gearshape"
         }
     }

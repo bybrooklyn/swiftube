@@ -70,8 +70,16 @@ final class AppModel {
     private(set) var isSigningIn = false
 
     /// Non-nil while the player is up. The player is a modal surface: when it
-    /// exists it takes the whole intent stream.
+    /// exists it takes the whole intent stream — unless it is detached.
     private(set) var player: PlayerModel?
+
+    /// True while the video plays on in its picture-in-picture window with the
+    /// player chrome put away. The `PlayerModel` stays alive (its layer is
+    /// what PiP is showing); the browse surface has the intents.
+    private(set) var isPlayerDetached = false
+
+    /// One download at a time, on the shared session.
+    let downloads: VideoDownloadService
 
     @ObservationIgnored private var memory = BrowseNavigator.ColumnMemory()
     @ObservationIgnored private let input = InputRouter()
@@ -80,6 +88,7 @@ final class AppModel {
         let api = InnerTubeAPI()
         self.api = api
         self.browse = BrowseViewModel(api: api)
+        self.downloads = VideoDownloadService(api: api)
     }
 
     /// Applies the "Hide Shorts" setting.
@@ -607,6 +616,17 @@ final class AppModel {
     /// same call the shelf-level hide uses — not a local filter.
     private func openCardMenu(for video: Video) {
         var rows: [CardMenuModel.Row] = []
+        if !video.isPlaylistTile, !video.isLive {
+            if DownloadStore.shared.contains(videoId: video.id) {
+                rows.append(.init(id: "delete-download", title: "Delete download", symbol: "trash") { [weak self] in
+                    self?.deleteDownload(video)
+                })
+            } else {
+                rows.append(.init(id: "download", title: "Download", symbol: "arrow.down.circle") { [weak self] in
+                    self?.startDownload(video)
+                })
+            }
+        }
         if !video.isPlaylistTile {
             rows.append(.init(id: "not-interested", title: "Not interested", symbol: "eye.slash") { [weak self] in
                 self?.sendFeedback(for: video, token: video.notInterestedToken, iconType: "NOT_INTERESTED")
@@ -782,9 +802,10 @@ final class AppModel {
             return
         }
 
-        if let player {
+        if let player, !isPlayerDetached {
             player.handle(intent)
             if player.didRequestDismiss { dismissPlayer() }
+            else if player.didRequestDetach { detachPlayer(player) }
             return
         }
 
@@ -951,6 +972,11 @@ final class AppModel {
     // MARK: - Player
 
     private func present(_ video: Video) {
+        // A video still playing in its PiP window gives way to the new one.
+        if isPlayerDetached {
+            player?.stopDetached()
+            isPlayerDetached = false
+        }
         let model = PlayerModel(api: api) { [weak self] channelId in
             self?.isSubscribed(toChannel: channelId) ?? false
         }
@@ -959,6 +985,18 @@ final class AppModel {
         // the shared API is not enough to arm the authenticated stream paths.
         model.playback.updateAuthToken(auth.accessToken)
         model.playback.updateSAPISID(auth.sapisid)
+        model.onPictureInPictureRestore = { [weak self, weak model] in
+            guard let self, let model, self.player === model else { return }
+            withAnimation(Theme.travel) { self.isPlayerDetached = false }
+        }
+        model.onPictureInPictureChange = { [weak self, weak model] active in
+            // The PiP window was closed with the chrome already put away:
+            // nothing is left to come back to, so playback ends.
+            guard let self, let model, self.player === model, !active, self.isPlayerDetached else { return }
+            model.stopDetached()
+            self.isPlayerDetached = false
+            self.player = nil
+        }
         withAnimation(Theme.travel) { player = model }
         model.play(video)
     }
@@ -968,6 +1006,71 @@ final class AppModel {
         // The player's Subscribe button writes through the API without
         // touching the guide; pick up any change now.
         Task { await loadGuideChannels() }
+    }
+
+    /// Back while the video is in its PiP window: the chrome goes, the video
+    /// carries on, and the browse surface is live again behind it.
+    private func detachPlayer(_ model: PlayerModel) {
+        model.didRequestDetach = false
+        withAnimation(Theme.travel) { isPlayerDetached = true }
+    }
+
+    // MARK: - Downloads
+
+    /// A transient line for the download pill: a refusal, or the service's
+    /// own state while it is doing something.
+    private var downloadNotice: String?
+
+    var downloadStatus: String? {
+        if let downloadNotice { return downloadNotice }
+        switch downloads.state {
+        case .idle:        return nil
+        case .fetching:    return "Preparing download…"
+        case .downloading: return "Downloading…"
+        case .saving:      return "Saving…"
+        case .done:        return "Downloaded"
+        case let .failed(reason): return reason
+        }
+    }
+
+    private func startDownload(_ video: Video) {
+        closeCardMenu()
+        let limit = Int64(settingsStore.settings.downloadLimitGB) * 1_000_000_000
+        guard DownloadStore.shared.totalBytes < limit else {
+            notice("Download limit of \(settingsStore.settings.downloadLimitGB) GB reached — delete something in Library")
+            return
+        }
+        guard !downloads.state.isActive else {
+            notice("A download is already running")
+            return
+        }
+        downloads.download(video: video)
+        // Let "Downloaded" / a failure sit for a moment, then clear the pill.
+        Task { [downloads] in
+            while downloads.state.isActive { try? await Task.sleep(for: .milliseconds(500)) }
+            try? await Task.sleep(for: .seconds(4))
+            if !downloads.state.isActive { downloads.reset() }
+        }
+    }
+
+    private func deleteDownload(_ video: Video) {
+        closeCardMenu()
+        DownloadStore.shared.remove(videoId: video.id)
+        customShelves = customShelves.compactMap { shelf in
+            guard shelf.id == "lib-downloads" else { return shelf }
+            var shelf = shelf
+            shelf.videos.removeAll { $0.id == video.id }
+            return shelf.videos.isEmpty ? nil : shelf
+        }
+        notice("Download deleted")
+    }
+
+    private func notice(_ text: String) {
+        downloadNotice = text
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if downloadNotice == text { downloadNotice = nil }
+        }
     }
 
     /// Starts resolving the focused video's stream after a short dwell.

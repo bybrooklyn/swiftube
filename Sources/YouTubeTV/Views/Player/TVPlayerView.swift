@@ -26,7 +26,10 @@ struct TVPlayerView: View {
         // ran the scrubber past the right edge.
         ZStack {
             Color.black
-            PlayerSurface(player: model.playback.player)
+            PlayerSurface(player: model.playback.player,
+                          pipRequest: model.pipRequest,
+                          onPictureInPictureActive: { model.pictureInPicture(active: $0) },
+                          onPictureInPictureRestore: { model.onPictureInPictureRestore() })
 
             if model.playback.isLoading {
                 ProgressView().controlSize(.large).tint(.white)
@@ -250,7 +253,7 @@ struct TVPlayerView: View {
     private var rightActions: some View {
         HStack(spacing: Theme.Metrics.transportGap(viewport)) {
             pill([.like, .dislike, .comments, .save, .addToPlaylist])
-            pill([.stats, .settings])
+            pill([.stats, .pip, .settings])
         }
     }
 

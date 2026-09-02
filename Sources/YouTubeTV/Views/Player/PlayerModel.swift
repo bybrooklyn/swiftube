@@ -42,6 +42,25 @@ final class PlayerModel {
     /// Set when the player should close and hand focus back to the browse surface.
     var didRequestDismiss = false
 
+    // MARK: - Picture in picture
+
+    /// Bumped to ask the surface to toggle PiP — the model has no layer to
+    /// call; `PlayerSurface` watches this value.
+    private(set) var pipRequest = 0
+    private(set) var isInPictureInPicture = false
+    /// Set instead of `didRequestDismiss` when Back is pressed while the video
+    /// is in its PiP window: the surface hides, playback carries on.
+    var didRequestDetach = false
+    /// Not intents, so not flags the owner polls after `handle`: AVKit calls
+    /// these on its own schedule. The owner installs them when it presents.
+    @ObservationIgnored var onPictureInPictureChange: (Bool) -> Void = { _ in }
+    @ObservationIgnored var onPictureInPictureRestore: () -> Void = {}
+
+    func pictureInPicture(active: Bool) {
+        isInPictureInPicture = active
+        onPictureInPictureChange(active)
+    }
+
     /// Which related video has focus while the up-next rail is open; nil when
     /// it is closed. The rail is opened by pressing Down from the transport,
     /// the same gesture the real client uses, and it is modal in the same way
@@ -178,8 +197,21 @@ final class PlayerModel {
 
     func close() {
         hideTask?.cancel()
+        // In its own window the video is the thing the user is watching;
+        // Back leaves the full-screen chrome, not the video.
+        if isInPictureInPicture {
+            didRequestDetach = true
+            return
+        }
         playback.stop()
         didRequestDismiss = true
+    }
+
+    /// Tears playback down for good — the PiP window was closed while the
+    /// player was detached, so there is nothing left to come back to.
+    func stopDetached() {
+        hideTask?.cancel()
+        playback.stop()
     }
 
     // MARK: - Intents
@@ -364,6 +396,7 @@ final class PlayerModel {
         case .addToPlaylist: openMenu(at: .playlist)
         case .description: openDescription()
         case .stats:       playback.toggleStatsForNerds()
+        case .pip:         pipRequest += 1
         }
     }
 
