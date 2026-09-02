@@ -81,7 +81,7 @@ extension PlaybackViewModel {
             }
             #endif
             setupRemoteCommandCenter()
-            DisplaySleep.isPrevented = true
+            DisplaySleep.hold(self)
             player.rate = Float(settings.playbackSpeed)
             isPlaying = true
             return
@@ -291,7 +291,7 @@ extension PlaybackViewModel {
         wkHLSEarlyTaskVideoId = nil
         #endif
         isLoading = false
-        DisplaySleep.isPrevented = false
+        DisplaySleep.release(self)
         updateNowPlayingPlayback()
         // Deregister from the global command center so a suspended VM never
         // handles lock screen Play while another VM is the active player.
@@ -323,7 +323,7 @@ extension PlaybackViewModel {
         player.rate = Float(settings.playbackSpeed)
         isPlaying = true
         showControls()
-        DisplaySleep.isPrevented = true
+        DisplaySleep.hold(self)
         updateNowPlayingPlayback()
     }
 
@@ -433,7 +433,7 @@ extension PlaybackViewModel {
                 // the download ends. (Bug #224: wrong video played after local file ends.)
                 relatedVideos = []
                 hasNext = false
-                DisplaySleep.isPrevented = true
+                DisplaySleep.hold(self)
                 updateNowPlayingInfo()
                 playerLog.notice("[loadAsync] local-file fast path: playing \(localURL.lastPathComponent)")
                 return
@@ -859,7 +859,7 @@ extension PlaybackViewModel {
             player.rate = Float(settings.playbackSpeed)
             isPlaying = true
             playerLog.notice("[loadAsync] rate set — player.rate=\(self.player.rate) timeControlStatus=\(self.player.timeControlStatus.rawValue)")
-            DisplaySleep.isPrevented = true
+            DisplaySleep.hold(self)
             updateNowPlayingInfo()
             // Only reschedule the auto-hide timer when controls are already visible.
             // Calling scheduleControlsHide() unconditionally cancels any timer that
@@ -1014,7 +1014,7 @@ extension PlaybackViewModel {
         // dependency on that ordering. Re-established defensively in loadAsync().
         rateObserver?.invalidate()
         rateObserver = nil
-        DisplaySleep.isPrevented = false
+        DisplaySleep.release(self)
         clearNowPlayingInfo()
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.removeTarget(nil)

@@ -26,31 +26,43 @@ enum DisplaySleep {
 
     private static var assertionID: IOPMAssertionID = 0
 
-    /// `true` while an assertion is held. Setting it is idempotent: repeated
-    /// `true` will not stack assertions (the pipeline sets it from several
-    /// playback paths), and repeated `false` is harmless.
-    static var isPrevented: Bool = false {
-        didSet {
-            guard isPrevented != oldValue else { return }
-            if isPrevented {
-                var id: IOPMAssertionID = 0
-                let result = IOPMAssertionCreateWithName(
-                    kIOPMAssertionTypeNoDisplaySleep as CFString,
-                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                    "YouTube playback" as CFString,
-                    &id
-                )
-                if result == kIOReturnSuccess {
-                    assertionID = id
-                } else {
-                    // Non-fatal: playback continues, the screen may just dim.
-                    isPrevented = false
-                }
-            } else if assertionID != 0 {
-                IOPMAssertionRelease(assertionID)
-                assertionID = 0
-            }
+    /// Who currently wants the display kept awake. A `Set` rather than a
+    /// plain Bool: this app can have two live `PlaybackViewModel`s at once
+    /// (the video player and the Music tab), and a Bool has no way to tell
+    /// "still held by the other one" from "nobody wants this anymore" — the
+    /// Music tab closing used to release the assertion while a detached PiP
+    /// video was still playing. Keyed by the owner's identity so one
+    /// instance's own repeated `hold` calls (it does this from several
+    /// playback paths) don't double-count against itself.
+    private static var holders: Set<ObjectIdentifier> = []
+
+    static var isPrevented: Bool { !holders.isEmpty }
+
+    static func hold(_ owner: AnyObject) {
+        let wasEmpty = holders.isEmpty
+        holders.insert(ObjectIdentifier(owner))
+        guard wasEmpty else { return }
+
+        var id: IOPMAssertionID = 0
+        let result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypeNoDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "YouTube playback" as CFString,
+            &id
+        )
+        if result == kIOReturnSuccess {
+            assertionID = id
+        } else {
+            // Non-fatal: playback continues, the screen may just dim.
+            holders.removeAll()
         }
+    }
+
+    static func release(_ owner: AnyObject) {
+        holders.remove(ObjectIdentifier(owner))
+        guard holders.isEmpty, assertionID != 0 else { return }
+        IOPMAssertionRelease(assertionID)
+        assertionID = 0
     }
 }
 
