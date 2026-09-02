@@ -101,6 +101,19 @@ public final class DownloadStore {
         saveManifest()
     }
 
+    public func contains(videoId: String) -> Bool {
+        entries.contains { $0.videoId == videoId }
+    }
+
+    /// Bytes on disk across every download — what the macOS size limit
+    /// compares against. Not upstream.
+    public var totalBytes: Int64 {
+        entries.reduce(0) { total, entry in
+            let size = (try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path)[.size] as? Int64) ?? 0
+            return total + size
+        }
+    }
+
     /// Deletes the MP4 file and removes the record from the manifest.
     public func remove(videoId: String) {
         if let entry = entries.first(where: { $0.videoId == videoId }) {

@@ -89,8 +89,28 @@ struct RootView: View {
 
                 if let player = model.player {
                     TVPlayerView(model: player)
+                        // Detached (video in its PiP window): the view stays in
+                        // the tree so the layer PiP hangs off survives, but it
+                        // is invisible and behind everything.
+                        .opacity(model.isPlayerDetached ? 0 : 1)
+                        .allowsHitTesting(!model.isPlayerDetached)
                         .transition(.opacity)
-                        .zIndex(1)
+                        .zIndex(model.isPlayerDetached ? -1 : 1)
+                }
+
+                if let status = model.downloadStatus {
+                    Text(status)
+                        .font(.system(size: Theme.Metrics.cardMetaSize(geo.size), weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, Theme.Metrics.rem(1.1, geo.size))
+                        .padding(.vertical, Theme.Metrics.rem(0.6, geo.size))
+                        .background(.black.opacity(0.82), in: .capsule)
+                        .overlay(Capsule().strokeBorder(Theme.divider, lineWidth: 1))
+                        .padding(Theme.Metrics.rem(2, geo.size))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .transition(.opacity)
+                        .zIndex(5)
+                        .animation(Theme.stateChange, value: status)
                 }
             }
             .overlay(alignment: .topLeading) { TrafficLights() }

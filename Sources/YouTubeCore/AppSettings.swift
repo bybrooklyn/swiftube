@@ -162,6 +162,12 @@ public struct AppSettings: Codable {
     /// toggle; defaults on. Not upstream — added for the macOS leanback UI.
     public var liquidGlassEnabled: Bool
 
+    // MARK: Downloads (macOS port)
+    /// Ceiling on the total size of downloaded videos, in gigabytes. A new
+    /// download is refused, with a message, once the store is at or over it.
+    /// Not upstream.
+    public var downloadLimitGB: Int
+
     // MARK: Schema version
     /// Persisted schema version. Starts at 1 for newly stored settings.
     /// Old JSON lacking this key decodes as 0, signalling a pre-migration store.
@@ -230,7 +236,13 @@ public struct AppSettings: Codable {
         playbackSpeed        = 1.0
         autoplayEnabled      = true
         subtitlesLanguage    = nil
+        // On by default on macOS: a desktop app keeps playing when another
+        // window is in front, and pausing on deactivation reads as a bug there.
+        #if os(macOS)
+        backgroundPlaybackEnabled = true
+        #else
         backgroundPlaybackEnabled = false
+        #endif
         landscapeAlwaysPlay  = false
         pipEnabled           = true
         miniPlayerEnabled    = true
@@ -280,6 +292,7 @@ public struct AppSettings: Codable {
         useTOSPlayerOnMac    = false
         #endif
         liquidGlassEnabled   = true
+        downloadLimitGB      = 10
         settingsVersion      = 1
     }
 }
@@ -345,6 +358,7 @@ extension AppSettings {
         case iCloudSyncEnabled
         case useTOSPlayerOnMac
         case liquidGlassEnabled
+        case downloadLimitGB
     }
 
     public init(from decoder: Decoder) throws {
@@ -389,5 +403,6 @@ extension AppSettings {
         iCloudSyncEnabled            = c.safeDecode(Bool.self,              forKey: .iCloudSyncEnabled,            default: d.iCloudSyncEnabled)
         useTOSPlayerOnMac            = c.safeDecode(Bool.self,              forKey: .useTOSPlayerOnMac,            default: d.useTOSPlayerOnMac)
         liquidGlassEnabled           = c.safeDecode(Bool.self,              forKey: .liquidGlassEnabled,           default: d.liquidGlassEnabled)
+        downloadLimitGB              = c.safeDecode(Int.self,               forKey: .downloadLimitGB,              default: d.downloadLimitGB)
     }
 }
