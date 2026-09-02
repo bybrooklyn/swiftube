@@ -112,19 +112,20 @@ public struct Lyrics: Hashable, Codable, Sendable {
     /// time observer, several times a second, for the whole song.
     public func lineIndex(at time: TimeInterval) -> Int? {
         guard isSynced else { return nil }
+        // Search only the timed lines — an untimed line (a blank spacer, or a
+        // merged/partial LRC's stray header) has no ordering to binary-search
+        // against, so filter it out first rather than special-casing it mid
+        // search: discarding the wrong half around it returned a stale index.
+        let timed = lines.enumerated().compactMap { index, line in
+            line.start.map { (index: index, start: $0) }
+        }
         var low = 0
-        var high = lines.count - 1
+        var high = timed.count - 1
         var found: Int?
         while low <= high {
             let mid = (low + high) / 2
-            guard let start = lines[mid].start else {
-                // An untimed line inside a timed set: treat it as part of the
-                // line above it, so a blank spacer never steals the highlight.
-                if mid == low { low += 1 } else { high = mid - 1 }
-                continue
-            }
-            if start <= time {
-                found = mid
+            if timed[mid].start <= time {
+                found = timed[mid].index
                 low = mid + 1
             } else {
                 high = mid - 1

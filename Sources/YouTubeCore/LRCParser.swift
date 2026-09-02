@@ -17,6 +17,12 @@ public enum LRCParser {
     ///    and dropping them makes the highlight jump early.
     public static func parse(_ document: String) -> [LyricLine] {
         var lines: [LyricLine] = []
+        // NetEase/Musixmatch documents show up CRLF; splitting on "\n" alone
+        // (like `parsePlain` normalizes for but this did not) left a trailing
+        // "\r" on every line, and `.whitespaces` in `split(_:)`'s trim below
+        // does not include it — poisoning both rendering and every
+        // similarity/agreement comparison downstream.
+        let document = document.replacingOccurrences(of: "\r\n", with: "\n")
         for raw in document.split(separator: "\n", omittingEmptySubsequences: false) {
             let (times, text) = split(String(raw))
             guard !times.isEmpty else { continue }
@@ -45,7 +51,7 @@ public enum LRCParser {
             remainder = remainder[remainder.index(after: close)...]
         }
 
-        return (times, remainder.trimmingCharacters(in: .whitespaces))
+        return (times, remainder.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// `mm:ss.xx` → seconds. Returns nil for anything that is not a timestamp.

@@ -102,13 +102,20 @@ public enum LyricsMatching {
         return words.contains { noiseWords.contains($0) }
     }
 
-    /// Drops "feat. X", "ft X", "featuring X" and "with X" up to the next
-    /// bracket or dash. Lyrics databases index the primary artist only.
+    /// Drops "feat. X", "ft X" and "featuring X" up to the next bracket or
+    /// dash. Lyrics databases index the primary artist only.
+    ///
+    /// A marker only counts at a word boundary — a plain substring search
+    /// used to fire inside ordinary titles ("Soft Rock" contains "ft ";
+    /// "Drift Away", "Lift Me Up" and "Left Hand Free" all contain "ft ")
+    /// and truncate them to a couple of letters. "with " was dropped
+    /// entirely rather than boundary-checked: it is a preposition far more
+    /// often than a credit ("Gone with the Wind").
     public static func removeFeaturedCredits(from raw: String) -> String {
-        let markers = ["feat.", "feat ", "ft.", "ft ", "featuring ", "with "]
+        let markers = ["feat.", "feat ", "ft.", "ft ", "featuring "]
         var text = raw
         for marker in markers {
-            guard let range = text.range(of: marker, options: .caseInsensitive) else { continue }
+            guard let range = firstWordBoundaryMatch(of: marker, in: text) else { continue }
             let tail = text[range.upperBound...]
             // Keep anything after the credit that starts a new clause: a bracket,
             // or a *spaced* dash. A bare hyphen does not count — "Jay-Z" is one
@@ -120,6 +127,20 @@ public enum LyricsMatching {
             text = String(text[..<range.lowerBound]) + remainder
         }
         return text
+    }
+
+    /// `text.range(of: marker)`, but only when nothing alphanumeric sits
+    /// immediately before the match — "feat" inside "defeat" does not count.
+    private static func firstWordBoundaryMatch(of marker: String, in text: String) -> Range<String.Index>? {
+        var searchStart = text.startIndex
+        while let range = text.range(of: marker, options: .caseInsensitive, range: searchStart..<text.endIndex) {
+            let boundaryOK = range.lowerBound == text.startIndex
+                || !text[text.index(before: range.lowerBound)].isLetter
+                && !text[text.index(before: range.lowerBound)].isNumber
+            if boundaryOK { return range }
+            searchStart = range.upperBound
+        }
+        return nil
     }
 
     private static func removeNoiseDashSuffix(from raw: String) -> String {
@@ -247,10 +268,37 @@ public enum LyricsMatching {
 
     /// Whether two sets of lyrics are telling the same story.
     ///
-    /// Compared on canonical text so punctuation, capitalisation and line breaks
-    /// (which every source disagrees about) do not register as a difference.
+    /// Word-bigram Dice, not the character-bigram `similarity` above: over a
+    /// whole document, character bigrams converge on plain English-language
+    /// statistics — two unrelated songs routinely score 0.6-0.8 on that
+    /// metric, squarely inside where a real match would also land, so it
+    /// could not actually discriminate. Word bigrams carry enough of the
+    /// text's actual structure that real duplicates land around 0.85+ and
+    /// different songs around 0.1.
     public static func agree(_ a: Lyrics, _ b: Lyrics) -> Bool {
-        similarity(canonical(a.plainText), canonical(b.plainText)) >= 0.72
+        wordBigramSimilarity(canonical(a.plainText), canonical(b.plainText)) >= 0.5
+    }
+
+    private static func wordBigramSimilarity(_ a: String, _ b: String) -> Double {
+        if a == b { return 1 }
+        let left = wordBigrams(a)
+        let right = wordBigrams(b)
+        guard !left.isEmpty, !right.isEmpty else { return a == b ? 1 : 0 }
+
+        var counts: [String: Int] = [:]
+        for gram in left { counts[gram, default: 0] += 1 }
+        var shared = 0
+        for gram in right where (counts[gram] ?? 0) > 0 {
+            counts[gram]! -= 1
+            shared += 1
+        }
+        return 2 * Double(shared) / Double(left.count + right.count)
+    }
+
+    private static func wordBigrams(_ text: String) -> [String] {
+        let words = text.split(separator: " ")
+        guard words.count > 1 else { return words.map(String.init) }
+        return (0..<(words.count - 1)).map { "\(words[$0]) \(words[$0 + 1])" }
     }
 
     /// Picks the result to show from everything the chain gathered.
