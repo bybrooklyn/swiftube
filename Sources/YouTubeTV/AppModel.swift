@@ -704,14 +704,25 @@ final class AppModel {
     @ObservationIgnored private var pointerAnchor: CGPoint = .zero
 
     private func pointerHasMoved() -> Bool {
-        // A held button is a drag, not pointing. Moving the mouse with the
-        // button down streams hover events; each one moved focus, the strip
-        // travelled under the still cursor, and the next card's hover moved it
-        // again — the page scrolled with the drag like an old browser's
-        // autoscroll. Hover-driven focus waits for the button to come up.
+        // A held button is a drag, not pointing: hover-driven focus waits for
+        // it to come up.
         guard NSEvent.pressedMouseButtons == 0 else { return false }
         let now = NSEvent.mouseLocation
         return hypot(now.x - pointerAnchor.x, now.y - pointerAnchor.y) > 2
+    }
+
+    /// Consumes the pointer movement that a hover just spent.
+    ///
+    /// The anchor used to be set only by key presses, so a hover-driven focus
+    /// change left it stale: the row (or the guide) travelled to park the
+    /// hovered element, a *different* element slid under the still cursor,
+    /// and its hover passed the movement test against the old anchor — which
+    /// moved focus again, which travelled again. The page scrolled itself to
+    /// the end of a row or the bottom of the feed like an old browser's
+    /// autoscroll, from a single hover or a click-drag. Anchoring here means
+    /// content moving under a still cursor is never a second move.
+    private func pointerDidFocus() {
+        pointerAnchor = NSEvent.mouseLocation
     }
 
     // Pointer access to the overlays. Each hovers through the same movement
@@ -721,6 +732,7 @@ final class AppModel {
     func hover(search target: SearchModel.Focus) {
         guard pointerHasMoved() else { return }
         search?.focus(on: target)
+        pointerDidFocus()
     }
 
     func click(search target: SearchModel.Focus) {
@@ -732,6 +744,7 @@ final class AppModel {
     func hover(settingsRow index: Int) {
         guard pointerHasMoved() else { return }
         settings?.focus(row: index)
+        pointerDidFocus()
     }
 
     func click(settingsRow index: Int) {
@@ -747,6 +760,7 @@ final class AppModel {
             focus = .topBar(item)
             isRailExpanded = false
         }
+        pointerDidFocus()
     }
 
     func click(topBar item: TopBarItem) {
@@ -768,6 +782,7 @@ final class AppModel {
             focus = target
             isRailExpanded = false
         }
+        pointerDidFocus()
         prefetchFocusedVideo()
     }
 
@@ -780,6 +795,7 @@ final class AppModel {
             focus = target
             isRailExpanded = true
         }
+        pointerDidFocus()
     }
 
     /// A click focuses first and then activates, so clicking an unfocused card
