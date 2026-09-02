@@ -150,9 +150,8 @@ enum Theme {
     /// State changes that are not travel — a ring appearing, a colour swapping.
     static let stateChange = Animation.easeOut(duration: 0.15)
 
-    /// The guide's selection highlight, which the real client moves on a short
-    /// linear curve rather than the travel curve.
-    static let highlight = Animation.linear(duration: 0.15)
+    // Two curves, and only two (see AGENTS.md). A third, `highlight`, sat here
+    // unused; the guide's selection pill already moves on `travel`.
 }
 
 // MARK: - Viewport size in the environment
