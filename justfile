@@ -12,7 +12,9 @@ test_flags := "-Xswiftc -F -Xswiftc " + clt_frameworks + \
               " -Xlinker -F -Xlinker " + clt_frameworks + \
               " -Xlinker -rpath -Xlinker " + clt_frameworks
 
-default: build
+# List available recipes.
+default:
+    @just --list
 
 # Compile everything.
 build:

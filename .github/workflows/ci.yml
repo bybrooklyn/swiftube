@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This repo is developed against the Command Line Tools only (no Xcode) —
+      # see AGENTS.md. GitHub's macOS runners ship both; forcing CLT-only here
+      # is what makes CI catch the toolchain gaps a contributor building the
+      # documented way would actually hit, instead of silently passing on
+      # Xcode's fuller toolchain.
+      - name: Select Command Line Tools (no Xcode)
+        run: sudo xcode-select -s /Library/Developer/CommandLineTools
+
+      - name: Install just
+        run: brew install just
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      # Serial (--no-parallel) is required, not a preference — see the note in
+      # the justfile: several test suites share global singletons and fail a
+      # different random handful under parallel execution.
+      - name: Test
+        run: just test
+
+      # Proves more than `swift build`: build-app.sh asserts every @rpath
+      # dependency resolves inside the bundle and that the n-descrambler's JS
+      # solvers actually land in Resources. Signs ad-hoc since CI has no
+      # persistent signing identity.
+      - name: Build app bundle
+        run: just app
