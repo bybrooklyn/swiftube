@@ -55,6 +55,14 @@ final class AppModel {
     /// every directional press.
     private(set) var search: SearchModel?
 
+    /// Non-nil while the Music tab is up.
+    ///
+    /// Modal like search and settings rather than a browse section, because
+    /// YouTube Music's catalog is not a video feed — an album page is a header
+    /// over a numbered track list, and the now-playing panel is a queue and a
+    /// lyrics view. None of that is a shelf of `Video`s.
+    private(set) var music: MusicModel?
+
     private(set) var focus: BrowseFocus = .card(shelf: 0, index: 0)
     private(set) var isRailExpanded = false
 
@@ -266,6 +274,16 @@ final class AppModel {
             return
         }
 
+        // Music is its own surface (plan 9.5), not `fetchMusic()`'s generic
+        // shelf of videos.
+        if item == .music {
+            selectedRailItem = item
+            memory.railItem = item
+            isRailExpanded = false
+            openMusic()
+            return
+        }
+
         // Podcasts has no browse id, so it is a search — the same approach
         // fetchNews already takes for its own missing browseId. Without this the
         // entry did nothing at all: sectionTypeName is nil, so `open` fell
@@ -321,6 +339,18 @@ final class AppModel {
     private func closeSearch() {
         search = nil
         focus = .rail(.search)
+        isRailExpanded = true
+    }
+
+    func openMusic() {
+        music = MusicModel(api: api, settingsStore: settingsStore)
+        music?.start()
+    }
+
+    private func closeMusic() {
+        music?.stop()
+        music = nil
+        focus = .rail(.music)
         isRailExpanded = true
     }
 
@@ -507,6 +537,14 @@ final class AppModel {
             case .back:                closeSettings()
             default:                   break
             }
+            return
+        }
+
+        if let music {
+            music.handle(intent)
+            // Left from the leftmost column, or Back at the tab's root: the
+            // guide takes over, the same gesture that leaves a browse shelf.
+            if music.didRequestExit { closeMusic() }
             return
         }
 

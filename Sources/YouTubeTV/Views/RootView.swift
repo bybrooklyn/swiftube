@@ -63,6 +63,11 @@ struct RootView: View {
                         .zIndex(3)
                 }
 
+                if let music = model.music {
+                    MusicView(model: music)
+                        .zIndex(3)
+                }
+
                 if model.isSigningIn {
                     SignInView(auth: model.auth) { model.finishSignIn() }
                         .zIndex(2)
