@@ -25,6 +25,7 @@ private final class MockQualityDelegate: QualityContext, QualityEventHandler {
     var settings = AppSettings()
     var currentVideo: Video? = nil
     var currentTime: TimeInterval = 0
+    var isPlaying = true
     var toastMessage: String? = nil
     var isSwappingItem = false
     var isQualityChangePending = false
@@ -70,6 +71,20 @@ struct PerVideoQualityOverrideTests {
         #expect(mgr.perVideoQuality == .q720)
         #expect(delegate.settings.preferredQuality == .q480)
         #expect(mgr.effectiveQuality == .q720)
+    }
+
+    @Test("A switch started while paused does not resume playback")
+    @MainActor
+    func pausedSwitchStaysPaused() {
+        let (mgr, delegate) = makeManager(default: .auto)
+        delegate.isPlaying = false
+        mgr.selectFormat(makeFormat(height: 720))
+        #expect(mgr.resumeAfterSwitch == false)
+        delegate.isPlaying = true
+        mgr.selectFormat(makeFormat(height: 480))
+        #expect(mgr.resumeAfterSwitch == true)
+        mgr.reset()
+        #expect(mgr.resumeAfterSwitch == true)
     }
 
     @Test("Explicitly picking Auto overrides a non-auto default")

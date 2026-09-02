@@ -20,8 +20,14 @@ final class PlayerModel {
 
     /// Takes the app's shared `InnerTubeAPI` so playback runs on the same
     /// session identity as browsing — see the note on `AppModel.api`.
-    init(api: InnerTubeAPI) {
+    /// Whether the account follows a channel. Answered by `AppModel` from the
+    /// guide's subscription list; the button used to reset to "not subscribed"
+    /// on every play with nothing ever fetching the real state.
+    @ObservationIgnored private let isSubscribedTo: (String) -> Bool
+
+    init(api: InnerTubeAPI, isSubscribedTo: @escaping (String) -> Bool = { _ in false }) {
         self.api = api
+        self.isSubscribedTo = isSubscribedTo
         self.playback = PlaybackViewModel(api: api)
     }
 
@@ -151,6 +157,8 @@ final class PlayerModel {
     /// straight through `PlaybackViewModel`, so the title and metadata updated
     /// while the avatar kept showing the previous video's channel.
     func loadChannelAvatar(for channelId: String?) {
+        // Before the same-channel guard: `play()` reset the flag already.
+        isSubscribed = channelId.map(isSubscribedTo) ?? false
         guard channelId != avatarChannelId else { return }
         avatarChannelId = channelId
         channelAvatarURL = nil
@@ -207,7 +215,7 @@ final class PlayerModel {
         if let menu {
             switch intent {
             case let .move(direction): menu.move(direction)
-            case .select:              _ = menu.select()
+            case .select:              menu.select()
             case .back, .menu:         closeMenu()
             case .playPause:           playback.togglePlayPause()
             case let .seek(direction): seek(direction)

@@ -190,8 +190,12 @@ public struct VideoFormat: Identifiable, Hashable, Sendable {
     public var mimeType: String
     public var url: URL?
     public var bitrate: Int?
+    /// High dynamic range (PQ or HLG transfer), from the format's `colorInfo`
+    /// or a "HDR" qualityLabel. Was never parsed, so an AV1 HDR itag and its
+    /// SDR sibling were indistinguishable in the picker.
+    public var isHDR: Bool
 
-    public init(id: UUID = UUID(), label: String, width: Int, height: Int, fps: Int, mimeType: String, url: URL? = nil, bitrate: Int? = nil) {
+    public init(id: UUID = UUID(), label: String, width: Int, height: Int, fps: Int, mimeType: String, url: URL? = nil, bitrate: Int? = nil, isHDR: Bool = false) {
         self.id = id
         self.label = label
         self.width = width
@@ -200,9 +204,10 @@ public struct VideoFormat: Identifiable, Hashable, Sendable {
         self.mimeType = mimeType
         self.url = url
         self.bitrate = bitrate
+        self.isHDR = isHDR
     }
 
-    public var qualityLabel: String { "\(height)p\(fps > 30 ? "\(fps)" : "")" }
+    public var qualityLabel: String { "\(height)p\(fps > 30 ? "\(fps)" : "")\(isHDR ? " HDR" : "")" }
 
     /// Short human-readable codec identifier derived from `mimeType`, e.g. "H.264", "VP9", "AV1".
     public var codecShortLabel: String {

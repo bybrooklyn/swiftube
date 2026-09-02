@@ -347,7 +347,9 @@ private struct Scrubber: View {
 
                 // SponsorBlock segments, drawn under the playhead so a skipped
                 // stretch is visible before you reach it.
-                ForEach(model.playback.sponsorSegments, id: \.start) { segment in
+                // Keyed on the segment's own id: two overlapping segments can
+                // share a start time, and `id: \.start` then dropped one.
+                ForEach(model.playback.sponsorSegments) { segment in
                     let x = CGFloat(segment.start / duration) * width
                     let w = CGFloat((segment.end - segment.start) / duration) * width
                     Capsule()

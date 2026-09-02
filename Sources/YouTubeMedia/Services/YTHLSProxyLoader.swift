@@ -116,7 +116,14 @@ final class YTHLSProxyLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecke
 
         let key = ObjectIdentifier(loadingRequest)
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self else { return }
+            guard let self else {
+                // Returning without finishing the request leaves AVFoundation
+                // waiting on it forever — a loader released mid-flight hung
+                // the player rather than failing it.
+                loadingRequest.finishLoading(with: NSError(domain: "YTHLSProxy", code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "proxy loader released mid-request"]))
+                return
+            }
             defer {
                 self.lock.lock()
                 self.activeTasks.removeValue(forKey: key)

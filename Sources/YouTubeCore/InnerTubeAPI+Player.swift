@@ -618,7 +618,11 @@ extension InnerTubeAPI {
                 }
                 let fps = f["fps"] as? Int ?? 30
                 let bitrate = f["bitrate"] as? Int
-                return VideoFormat(label: quality, width: width, height: height, fps: fps, mimeType: mimeType, url: url, bitrate: bitrate)
+                // HDR: PQ (SMPTE ST 2084) or HLG (ARIB STD-B67) transfer in colorInfo,
+                // or the label YouTube gives such formats ("1080p60 HDR").
+                let transfer = (f["colorInfo"] as? [String: Any])?["transferCharacteristics"] as? String ?? ""
+                let isHDR = transfer.contains("2084") || transfer.contains("B67") || quality.contains("HDR")
+                return VideoFormat(label: quality, width: width, height: height, fps: fps, mimeType: mimeType, url: url, bitrate: bitrate, isHDR: isHDR)
             }
         }
 

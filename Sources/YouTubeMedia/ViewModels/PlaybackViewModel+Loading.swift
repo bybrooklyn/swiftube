@@ -127,10 +127,12 @@ extension PlaybackViewModel {
         audioManager.reset()
         endCards = []
 
-        // Push the currently playing video onto the history stack before switching
-        if let prev = currentVideo {
+        // Push the currently playing video onto the history stack before switching —
+        // unless this load *is* a step back through that stack.
+        if !isNavigatingBack, let prev = currentVideo {
             history.append(prev)
         }
+        isNavigatingBack = false
         currentVideo = video
         // fix236: Record the intended video at load() time so checkWrongVideoOnFirstPlay()
         // can detect if a stale task swaps currentVideo before readyToPlay fires.
@@ -373,43 +375,12 @@ extension PlaybackViewModel {
                 await capturedAPI.prefetchPoToken(for: capturedVideoId)
             }
         }
-        #if canImport(WebKit)
-        // Fire-and-forget: start WKWebView BotGuard pipeline in the background.
-        // Takes 3–8 s; by the time the primary attempt fails and exhaustiveRetry runs,
-        // it may be ready to provide a full getMinter-minted token (CDN-accepted for rqh=1).
-        // Zero impact on primary path timing — runs concurrently.
-        if !BotGuardWebViewRunner.shared.isReady {
-            let capturedVideoIdForWV = video.id
-            Task { @MainActor in
-                await BotGuardWebViewRunner.shared.prepare(for: capturedVideoIdForWV)
-            }
-        }
-        // Fire-and-forget: start WKWebView HLS extraction concurrently with the primary path.
-        // For rqh=1 videos the ~2 s extraction overlaps the primary iOS attempt so the URL
-        // is ready (or nearly ready) by the time exhaustiveRetry reaches Phase -2, saving
-        // the serial 2–4 s wait. For non-rqh=1 videos the task completes silently unused.
-        // Use priorityExtract() (not serialExtract) so earlyTask starts wv.load() IMMEDIATELY
-        // without waiting for any in-flight VideoCardView second-serialExtract. A background
-        // card extraction (e.g. POTUARPb1CU) may have captured pendingSerialTask just before
-        // the tap; chaining onto it (serialExtract's behaviour) delays wv.load() by ~2.3 s,
-        // making CDN trust too stale (~0.5 s) for AndroidVR loadTracks (R12 regression).
-        // priorityExtract registers itself in pendingSerialTask so race-failed handlers still
-        // chain onto it correctly via serialExtract.
-        let capturedVideoIdForHLS = video.id
-        // Reuse an in-flight pre-warm started by stop() for the same video (fix10).
-        // If stop() already started serialExtract for this videoId, wkHLSEarlyTask is
-        // non-nil and for the same video — just let it run; racePathB awaits its value.
-        if wkHLSEarlyTask == nil {
-            wkHLSEarlyTaskVideoId = capturedVideoIdForHLS
-            wkHLSEarlyTask = Task { @MainActor in
-                // priorityExtract bypasses pendingSerialTask chaining → wv.load() starts
-                // immediately at tap time. For pfa/1 rqh=1 videos like _DY9cTWakcM, this
-                // refreshes CDN IP-level trust so it is only ~2.5 s old when AndroidVR
-                // loadTracks runs — within the ~2.5 s trust window.
-                return await YouTubeWebViewHLSExtractor.shared.priorityExtract(videoId: capturedVideoIdForHLS)
-            }
-        }
-        #endif
+        // The WKWebView BotGuard pre-warm and the early WKWebView HLS extraction
+        // that used to fire here on every load now start lazily, inside
+        // `exhaustiveRetry` once VisionOS and TVAuth have both failed — see
+        // `startWebViewHLSExtractionIfNeeded`. On macOS VisionOS HLS wins first
+        // (CLAUDE.md), so a full WebView session per load, and another per Back,
+        // was pure cost. Path A of the race still prepares BotGuard itself.
 
         // Local-file fast path — bypass all network fetches for downloaded videos.
         // The path must be inside Documents/SmartTubeDownloads/ to prevent path-traversal
@@ -648,7 +619,12 @@ extension PlaybackViewModel {
             if let hlsURL = info.hlsURL {
                 Task { [weak self] in
                     let variantURLs = await self?.fetchHLSVariantURLs(url: hlsURL) ?? [:]
-                    guard let self, !Task.isCancelled, !variantURLs.isEmpty else { return }
+                    // This task is not stored, so a video switch cannot cancel it;
+                    // check the video is still the one whose manifest was fetched,
+                    // or the *new* video's quality picker gets pruned to the old
+                    // one's variant list.
+                    guard let self, !Task.isCancelled, !variantURLs.isEmpty,
+                          self.currentVideo?.id == video.id else { return }
                     self.hlsVariantURLs = variantURLs
                     let beforeCount = self.availableFormats.count
                     self.availableFormats = self.availableFormats.filter { variantURLs.keys.contains($0.height) }
@@ -1009,32 +985,13 @@ extension PlaybackViewModel {
         // video for ~1s before the 403 fires. Evicting here forces a fresh extraction
         // on re-tap while still allowing neighbour pre-warms to populate the cache.
         //
-        // fix10: after evicting the stale CDN URL, start a fresh wkHLS extraction via
-        // serialExtract. When extraction completes (~1.25s), the URL is stored in cache
-        // so Phase -1a finds it on the next load() for this video (bypassing the full
-        // exhaustiveRetry race entirely → ~0.5s faster). The task is also assigned to
-        // wkHLSEarlyTask so racePathB can use it if the re-tap happens before extraction
-        // completes (< 1.25s after stop).
+        // (The upstream "fix10" re-extraction that used to start here — a fresh
+        // WKWebView session on every Back, to pre-warm a re-tap of the same
+        // video — is gone: on macOS the WebView path is a fallback that VisionOS
+        // HLS normally never reaches, so it was a whole browser session spent on
+        // a path that would not be used.)
         if let stoppedVideoId = currentVideo?.id {
             Task { await VideoPreloadCache.shared.invalidateWKHLSURL(for: stoppedVideoId) }
-            #if canImport(WebKit)
-            wkHLSEarlyTaskVideoId = stoppedVideoId
-            let capturedId = stoppedVideoId
-            wkHLSEarlyTask = Task { @MainActor in
-                guard let url = await YouTubeWebViewHLSExtractor.shared.serialExtract(videoId: capturedId) else { return nil }
-                // Defense-in-depth: if load() for a different video cancelled this task
-                // between serialExtract's return and the store, bail rather than write
-                // a potentially stale URL into the cache under the wrong key.
-                guard !Task.isCancelled else {
-                    playerLog.notice("[fix10] pre-warm task was cancelled — not caching URL for \(capturedId)")
-                    return nil
-                }
-                // Store the fresh URL so Phase -1a serves from cache on re-tap.
-                await VideoPreloadCache.shared.store(wkHLSManifestURL: url, for: capturedId)
-                playerLog.notice("[fix10] wkHLS pre-warm complete — cached for \(capturedId)")
-                return url
-            }
-            #endif
         }
         itemObserverTask?.cancel()
         itemObserverTask = nil

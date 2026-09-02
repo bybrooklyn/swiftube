@@ -148,10 +148,14 @@ final class AudioTrackManager {
             } ?? true  // nil defaultOption is fine (phase-2 simply marks none as original)
             playerLog.notice("AudioTrackManager: \(group.options.count) option(s), phase1Discriminates=\(phase1Discriminates) (mainContent=\(mainContentOptions.count)) defaultOption=\(defaultLocale) defaultInOptions=\(defaultFoundInOptions)")
 
-            for (_, option) in group.options.enumerated() {
+            for (index, option) in group.options.enumerated() {
                 let locale = option.locale?.identifier
                     ?? option.extendedLanguageTag
                     ?? "unknown"
+                // Keyed by locale alone, two renditions with the same language
+                // tag (a dub and a descriptive track, say) collided in
+                // `optionMap` and the later one was selected for both entries.
+                let id = "\(locale)#\(index)"
                 let displayName = option.locale.flatMap { loc -> String? in
                     let name = Locale.current.localizedString(forLanguageCode: loc.identifier)
                     if let name, !name.isEmpty { return name }
@@ -172,10 +176,10 @@ final class AudioTrackManager {
                 // Phase 2: fall back to HLS DEFAULT=YES identity check.
                 let isOriginal: Bool = phase1Discriminates ? isMainContent : isDefault
                 playerLog.notice("  AudioOption: locale=\(locale) isMainContent=\(isMainContent) isAuxiliary=\(isAuxiliary) isDefault=\(isDefault) isOriginal=\(isOriginal) displayName=\(displayName)")
-                let track = AudioTrack(id: locale, name: displayName,
+                let track = AudioTrack(id: id, name: displayName,
                                        languageCode: locale, isOriginal: isOriginal)
                 tracks.append(track)
-                optionMap[locale] = option
+                optionMap[id] = option
             }
             var originalCount = tracks.filter(\.isOriginal).count
             playerLog.notice("AudioTrackManager: \(originalCount)/\(tracks.count) track(s) marked isOriginal=true after phase1/2")

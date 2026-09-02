@@ -571,8 +571,10 @@ public actor VideoPreloadCache {
         let elapsed = String(format: "%.2fs", Date().timeIntervalSince(startedAt))
 
         if let player  { store(playerInfo: player,          for: videoId) }
+        // A failed player fetch used to cache `nil` tracking URLs for the full
+        // TTL, so the next hour of watch-time pings for that video went nowhere.
         let tracking: PlaybackTrackingURLs? = player?.trackingURLs
-        store(trackingURLs: tracking,                        for: videoId)
+        if let tracking { store(trackingURLs: tracking,      for: videoId) }
         if let next    { store(nextInfo: next,               for: videoId) }
         if let cards   { store(endCards: cards,              for: videoId) }
         store(sponsorSegments: sponsor,                      for: videoId)

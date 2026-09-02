@@ -19,6 +19,7 @@ public actor TokenManager {
 
     public enum Update: Sendable {
         case refreshed(token: String?, expiresAt: Date?)
+        case sapisidChanged(String?)
         case signedOut
     }
 
@@ -121,6 +122,10 @@ public actor TokenManager {
     public func setSAPISID(_ value: String?) {
         sapisid = value
         Self.kcSet(service: service, key: "st_sapisid", value: value)
+        // The cookie arrives seconds after sign-in completes, once the
+        // OAuthLogin/Multilogin exchange finishes. Without this yield the only
+        // mutator that fires late was also the only one nobody could hear.
+        continuation?.yield(.sapisidChanged(value))
     }
 
     public func clearToken() {

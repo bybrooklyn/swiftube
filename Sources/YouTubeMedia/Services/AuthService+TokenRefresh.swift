@@ -5,7 +5,25 @@ extension AuthService {
 
     // MARK: - Token refresh
 
+    /// Refreshes the access token, coalescing concurrent callers onto one request.
+    ///
+    /// `validAccessToken()`, `refreshIfNeeded()` and the proactive timer can all
+    /// decide to refresh at the same moment — an expired token at launch does
+    /// exactly that, from the feed, the cookie fetch and the user-info fetch.
+    /// Each used to POST /token on its own. Google may rotate the refresh token
+    /// on use, so the losers of that race could persist a token the server had
+    /// just invalidated. One request in flight at a time; everyone else awaits it.
     func refreshAccessToken(refreshToken: String, creds: YouTubeClientCredentials) async throws {
+        if let inFlight = refreshInFlight {
+            return try await inFlight.value
+        }
+        let task = Task { try await performRefresh(refreshToken: refreshToken, creds: creds) }
+        refreshInFlight = task
+        defer { refreshInFlight = nil }
+        try await task.value
+    }
+
+    private func performRefresh(refreshToken: String, creds: YouTubeClientCredentials) async throws {
         let epoch = authEpoch
         var req = URLRequest(url: Self.tokenURL)
         req.httpMethod = "POST"

@@ -111,6 +111,13 @@ extension PlaybackViewModel {
     static let retryLadderBudgetSeconds: Double = 45
 
     func exhaustiveRetry(video: Video, originalError: Error?, playerInfo: PlayerInfo? = nil, cached: CachedVideoData? = nil) async {
+        // Release the task handle when the ladder finishes. Nothing else did:
+        // only stop() and load() cleared `exhaustiveRetryTask`, so after the
+        // first stall-driven escalation the `== nil` guard in setupRateObserver
+        // stayed false for the rest of the video and every later stall loop was
+        // silently ignored. A cancelled run leaves the handle alone — whoever
+        // cancelled it has already replaced or cleared it.
+        defer { if !Task.isCancelled { exhaustiveRetryTask = nil } }
         // Testing override: --uitesting-force-stream-method restricts the retry to a
         // single named client so UI tests can probe one path at a time.
         if let method = StreamMethodProbeSupport.forcedStreamMethod {
@@ -292,6 +299,7 @@ extension PlaybackViewModel {
             }
         }
         if ladderExpired("the BotGuard/WebView race") { return giveUp(video: video) }
+        startWebViewHLSExtractionIfNeeded(for: video.id)
         // Phase -2 + Phase -1b: race BotGuardWV adaptive path vs WKWebView HLS path.
         //
         // Both paths start simultaneously. They interleave cooperatively at every `await`
@@ -843,8 +851,27 @@ extension PlaybackViewModel {
     }
     #endif // canImport(WebKit)
 
+    /// Starts the WKWebView HLS extraction that Path B of the race awaits.
+    ///
+    /// This used to run from `loadAsync` on every load (and from `stop()` on
+    /// every Back), so the WebView session was paid for even when VisionOS
+    /// HLS — the path that actually plays on macOS — succeeded seconds earlier.
+    /// It now starts here, only once the ladder has reached the race. Reuses an
+    /// in-flight task for the same video when one exists.
+    #if canImport(WebKit)
+    func startWebViewHLSExtractionIfNeeded(for videoId: String) {
+        guard wkHLSEarlyTask == nil else { return }
+        wkHLSEarlyTaskVideoId = videoId
+        wkHLSEarlyTask = Task { @MainActor in
+            // priorityExtract bypasses pendingSerialTask chaining so wv.load()
+            // starts immediately rather than behind a background card extraction.
+            await YouTubeWebViewHLSExtractor.shared.priorityExtract(videoId: videoId)
+        }
+    }
+    #endif
+
     /// Path B of the exhaustiveRetry race: early WKWebView HLS path.
-    /// Awaits the `wkHLSEarlyTask` started in `loadAsync` (already in-flight).
+    /// Awaits the `wkHLSEarlyTask` started by `startWebViewHLSExtractionIfNeeded`.
     /// Returns `true` if a stream reached `readyToPlay`.
     #if canImport(WebKit)
     func racePathB(video: Video) async -> Bool {

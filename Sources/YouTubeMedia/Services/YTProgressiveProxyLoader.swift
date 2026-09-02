@@ -154,7 +154,12 @@ final class YTProgressiveProxyLoader: NSObject, AVAssetResourceLoaderDelegate, @
         guard let real = components.url else { return false }
 
         Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                // Same hang as in YTHLSProxyLoader: an unfinished request stalls AVFoundation.
+                loadingRequest.finishLoading(with: NSError(domain: "YTProgressiveProxy", code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "proxy loader released mid-request"]))
+                return
+            }
             await self.serve(loadingRequest, from: real)
         }
         return true

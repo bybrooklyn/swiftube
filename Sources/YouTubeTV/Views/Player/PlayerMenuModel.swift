@@ -71,15 +71,16 @@ final class PlayerMenuModel {
                               isSelected: playback.selectedFormat == nil) { [playback] in
                 playback.selectFormat(nil)
             }
-            // Distinct heights only: the format list repeats a resolution once
-            // per codec, which would show "1080p" four times in a row.
-            var seen = Set<Int>()
+            // Distinct labels only: the format list repeats a resolution once
+            // per codec, which would show "1080p" four times in a row. HDR is
+            // part of the label, so "1080p HDR" keeps its own row.
+            var seen = Set<String>()
             let formats = playback.availableFormats
                 .sorted { $0.height > $1.height }
-                .filter { seen.insert($0.height).inserted }
+                .filter { seen.insert($0.qualityLabel).inserted }
                 .map { format in
-                    Option(id: "q\(format.height)", title: format.qualityLabel,
-                           isSelected: playback.selectedFormat?.height == format.height) { [playback] in
+                    Option(id: "q\(format.qualityLabel)", title: format.qualityLabel,
+                           isSelected: playback.selectedFormat?.qualityLabel == format.qualityLabel) { [playback] in
                         playback.selectFormat(format)
                     }
                 }
@@ -159,13 +160,14 @@ final class PlayerMenuModel {
         }
     }
 
-    /// Returns true when the menu should close.
-    func select() -> Bool {
+    /// Selecting a category moves into its options; selecting an option applies
+    /// it. The menu stays open either way — Back closes it. (This used to return
+    /// a "should close" flag that was always false and that no caller read.)
+    func select() {
         guard column == .options, options.indices.contains(optionIndex) else {
             if column == .categories, !options.isEmpty { move(.right) }
-            return false
+            return
         }
         options[optionIndex].apply()
-        return false
     }
 }

@@ -172,7 +172,7 @@ extension InnerTubeAPI {
               let unitRange = Range(match.range(at: 2), in: stripped),
               let value = Int(stripped[valueRange])
         else {
-            tubeLog.notice("parseRelativeDate '\(text, privacy: .public)' → no regex match")
+            tubeLog.debug("parseRelativeDate '\(text, privacy: .public)' → no regex match")
             return nil
         }
         let unit = String(stripped[unitRange])
@@ -188,7 +188,7 @@ extension InnerTubeAPI {
         default:       return nil
         }
         let result = Date(timeIntervalSinceNow: -seconds)
-        tubeLog.notice("parseRelativeDate '\(text, privacy: .public)' → \(value, privacy: .public) \(unit, privacy: .public)(s) ago → \(ISO8601DateFormatter().string(from: result), privacy: .public)")
+        tubeLog.debug("parseRelativeDate '\(text, privacy: .public)' → \(value, privacy: .public) \(unit, privacy: .public)(s) ago → \(ISO8601DateFormatter().string(from: result), privacy: .public)")
         return result
     }
 

@@ -74,7 +74,13 @@ struct VideoCard: View {
                 .strokeBorder(Theme.focusRing, lineWidth: isFocused ? ring : 0)
                 .padding(-ringInset)
         }
-        .animation(Theme.stateChange, value: isFocused)
+        // No `.animation(Theme.stateChange, value: isFocused)` here, and none
+        // on the title below. The ring and title used to run on their own
+        // 0.15 s clock while the strip slid under them on `Theme.travel`
+        // (0.3 s); at auto-repeat cadence the ring finished before the strip
+        // did, so the bright title read as belonging to a different card than
+        // the one parked under the ring. Inheriting the strip's transaction
+        // keeps the three moving as one object.
     }
 
     private func durationBadge(_ text: String, fill: Color) -> some View {
@@ -95,7 +101,6 @@ struct VideoCard: View {
                 .foregroundStyle(isFocused ? Theme.textPrimary : Theme.textSecondary)
                 .lineLimit(2, reservesSpace: true)
                 .multilineTextAlignment(.leading)
-                .animation(Theme.stateChange, value: isFocused)
 
             Text(video.channelTitle)
                 .font(.system(size: Theme.Metrics.cardMetaSize(viewport)))

@@ -25,6 +25,7 @@ protocol QualityContext: AnyObject {
     var settings: AppSettings { get }
     var currentVideo: Video? { get }
     var currentTime: TimeInterval { get }
+    var isPlaying: Bool { get }
     var toastMessage: String? { get set }
 }
 
@@ -103,6 +104,10 @@ final class PlaybackQualityManager {
     /// rather than reusing potentially-expired wkHLSMasterURL variant URLs.
     var isMuxedFallback: Bool = false
     var hasAppliedH264Cap: Bool = false
+    /// Whether the video was playing when the current switch began. Every
+    /// readyToPlay handler used to set the rate and `isPlaying = true`
+    /// unconditionally, so changing quality on a paused video resumed it.
+    var resumeAfterSwitch: Bool = true
     @ObservationIgnored var qualityTask: Task<Void, Never>? = nil
     @ObservationIgnored private var itemObserverTask: Task<Void, Never>? = nil
     #if canImport(WebKit)
@@ -158,6 +163,7 @@ final class PlaybackQualityManager {
         qualityTask = nil
         itemObserverTask?.cancel()
         itemObserverTask = nil
+        resumeAfterSwitch = true
         #if canImport(WebKit)
         webHLSProxyLoader = nil
         wkHLSMasterURL = nil
@@ -201,6 +207,7 @@ final class PlaybackQualityManager {
             return
         }
         let savedTime = delegate.currentTime
+        resumeAfterSwitch = delegate.isPlaying
         qualityTask = Task { [weak self] in
             guard let self else { return }
             #if canImport(WebKit)
@@ -219,7 +226,7 @@ final class PlaybackQualityManager {
                 return
             }
             if self.wkHLSMasterURL != nil {
-                await self.reloadWKHLSItem(seekTo: savedTime, height: format?.height)
+                await self.reloadWKHLSItem(seekTo: savedTime, height: format?.height, quality: quality)
                 return
             }
             #endif
@@ -285,7 +292,7 @@ final class PlaybackQualityManager {
                 case .readyToPlay:
                     let size = item.presentationSize
                     playerLog.notice("✅ Quality-switch readyToPlay — presentationSize=\(Int(size.width))x\(Int(size.height))")
-                    self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1)
+                    if self.resumeAfterSwitch { self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1) }
                     self.delegate?.qualityItemDidBecomeReady(item, seekTo: time)
                 case .failed:
                     let err = item.error.map { "\($0)" } ?? "nil"
@@ -484,7 +491,11 @@ final class PlaybackQualityManager {
     /// Returns all playable video-only formats for the quality picker, sorted for display.
     ///
     /// Only `video/mp4` formats are included. WebM/VP9 is excluded because:
-    /// - AVFoundation does not decode VP9/WebM on iOS.
+    /// - AVFoundation has no WebM demuxer — measured on macOS 27 with the probe in
+    ///   the section-1 PR: a VP9 `.webm` fails `loadTracks` with -11828 "Cannot Open",
+    ///   and VP9 remuxed into MP4 loads a track but reports `isPlayable == false`
+    ///   (no hardware VP9 decode on this Mac either). YouTube only serves VP9 in
+    ///   WebM, so there is nothing to enable. AV1-in-MP4 does play, and is kept.
     /// - YouTube's VP9 DASH streams (itag 278/598) return HTTP 403 from iOS, causing
     ///   quality switches to silently hang in `.unknown` status forever.
     ///
@@ -594,7 +605,7 @@ final class PlaybackQualityManager {
                 guard let self, !Task.isCancelled else { return }
                 switch status {
                 case .readyToPlay:
-                    self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1)
+                    if self.resumeAfterSwitch { self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1) }
                     self.delegate?.qualityItemDidBecomeReady(item, seekTo: time)
                     playerLog.notice("✅ H.264-capped AVPlayerItem readyToPlay")
                 case .failed:
@@ -625,7 +636,7 @@ final class PlaybackQualityManager {
     /// available when `height` is nil for Auto), routes it through a fresh `YTHLSProxyLoader`
     /// with the same nSolver as the current loader, and replaces the AVPlayer item.
     /// On `readyToPlay`, delegates the seek + rate restore to `qualityItemDidBecomeReady`.
-    private func reloadWKHLSItem(seekTo time: TimeInterval, height: Int?) async {
+    private func reloadWKHLSItem(seekTo time: TimeInterval, height: Int?, quality: AppSettings.VideoQuality) async {
         guard !Task.isCancelled else { return }
         let sortedHeights = hlsVariantURLs.keys.sorted(by: >)
         let selectedHeight: Int?
@@ -669,13 +680,19 @@ final class PlaybackQualityManager {
                 case .readyToPlay:
                     let size = item.presentationSize
                     playerLog.notice("✅ [wkHLS quality] readyToPlay — presentationSize=\(Int(size.width))x\(Int(size.height))")
-                    self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1)
+                    if self.resumeAfterSwitch { self.player.rate = Float(self.delegate?.settings.playbackSpeed ?? 1) }
                     self.delegate?.qualityItemDidBecomeReady(item, seekTo: time)
                 case .failed:
                     let err = item.error.map { "\($0)" } ?? "nil"
                     playerLog.error("❌ [wkHLS quality] AVPlayerItem failed: \(err)")
                     self.delegate?.isQualityChangePending = false
-                    await MainActor.run { self.delegate?.toastMessage = "Quality unavailable" }
+                    // Same recovery as the HLS and H.264-capped paths. This one
+                    // only showed a toast and left the failed item in the player.
+                    await self.delegate?.qualityItemDidFail(
+                        error: item.error,
+                        quality: quality,
+                        hasAppliedH264Cap: self.hasAppliedH264Cap
+                    )
                 case .unknown: break
                 @unknown default: break
                 }

@@ -618,7 +618,7 @@ extension InnerTubeAPI {
                     else { continue }
                     if let date = parseRelativeDate(str) {
                         publishedTimeText = str
-                        tubeLog.notice("tileRenderer id=\(videoId, privacy: .public) publishedTimeText='\(str, privacy: .public)'")
+                        tubeLog.debug("tileRenderer id=\(videoId, privacy: .public) publishedTimeText='\(str, privacy: .public)'")
                         return date
                     }
                     // Upcoming/scheduled: "Scheduled for 5/27/26, 4:00 PM"
@@ -629,7 +629,7 @@ extension InnerTubeAPI {
                     }
                 }
             }
-            tubeLog.notice("tileRenderer id=\(videoId, privacy: .public) publishedTimeText=nil (no date in tileMetadata)")
+            tubeLog.debug("tileRenderer id=\(videoId, privacy: .public) publishedTimeText=nil (no date in tileMetadata)")
             return nil
         }()
 
@@ -1003,7 +1003,7 @@ extension InnerTubeAPI {
         let publishedTimeText: String? = (r["publishedTimeText"] as? [String: Any]).flatMap { extractText($0) }
         let publishedAt: Date? = publishedTimeText.flatMap { parseRelativeDate($0) }
         let _ptv = publishedTimeText ?? "nil"
-        tubeLog.notice("videoRenderer id=\(videoId, privacy: .public) publishedTimeText='\(_ptv, privacy: .public)'")
+        tubeLog.debug("videoRenderer id=\(videoId, privacy: .public) publishedTimeText='\(_ptv, privacy: .public)'")
 
         return Video(
             id: videoId,
