@@ -7,20 +7,21 @@ set shell := ["bash", "-c"]
 # is present but its Modules directory is empty in the CLT, so any test file
 # importing both Foundation and Testing fails to build without it.
 clt_frameworks := "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
+# Testing.framework in the macOS 27 CLT links `@rpath/lib_TestingInterop.dylib`,
+# which lives one directory over; without this rpath the bundle fails to dlopen.
+clt_testlib := "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
 test_flags := "-Xswiftc -F -Xswiftc " + clt_frameworks + \
               " -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlay-search" + \
               " -Xlinker -F -Xlinker " + clt_frameworks + \
               " -Xlinker -rpath -Xlinker " + clt_frameworks + \
-              " -Xlinker -rpath -Xlinker " + clt_frameworks + "/../usr/lib"
-# The second rpath is for lib_TestingInterop.dylib, which Swift 6.4's Testing
-# framework loads at runtime from Library/Developer/usr/lib — not next to the
-# framework, and not anywhere dyld looks on its own.
+              " -Xlinker -rpath -Xlinker " + clt_testlib
 
-# Swift 6.4's Command Line Tools broke two things at once. SwiftPM now defaults
-# to the `swiftbuild` backend, which compiles Localizable.xcstrings with
-# Xcode's xcstringstool — not in the CLT. And the macOS 27 SDK makes SwiftUI's
-# @State a macro whose plugin (SwiftUIMacros) also ships only with Xcode. The
-# native backend plus the previous SDK sidestep both. build-app.sh mirrors this.
+# The macOS 27 Command Line Tools (Swift 6.4) changed two things at once:
+# `swift build` now defaults to the SwiftBuild backend, which shells out to
+# `xcstringstool` for Localizable.xcstrings (Xcode-only), and the 27.0 SDK
+# declares `@State` as a macro whose plugin (SwiftUIMacros) is Xcode-only too.
+# The 26.5 SDK is still installed and the native backend needs no tool, so
+# every recipe builds that way. `Scripts/build-app.sh` does the same.
 export SDKROOT := "/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
 build_system := "--build-system native"
 

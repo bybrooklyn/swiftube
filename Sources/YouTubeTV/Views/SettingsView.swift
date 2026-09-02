@@ -10,6 +10,7 @@ import YouTubeMedia
 struct SettingsView: View {
 
     @Bindable var model: SettingsModel
+    var onBack: () -> Void = {}
     @Environment(\.viewportSize) private var viewport
 
     var body: some View {
@@ -25,10 +26,13 @@ struct SettingsView: View {
             Color.clear.frame(width: Theme.Metrics.contentInset(viewport))
 
             VStack(alignment: .leading, spacing: Theme.Metrics.rem(1.0, viewport)) {
-                Text("Settings")
-                    .font(.system(size: Theme.Metrics.rem(2.0, viewport), weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.bottom, Theme.Metrics.rem(0.5, viewport))
+                HStack(spacing: Theme.Metrics.rem(1.0, viewport)) {
+                    BackChip(action: onBack)
+                    Text("Settings")
+                        .font(.system(size: Theme.Metrics.rem(2.0, viewport), weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .padding(.bottom, Theme.Metrics.rem(0.5, viewport))
 
                 ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
                     switch row.kind {
@@ -80,14 +84,16 @@ struct SettingsView: View {
             Spacer(minLength: Theme.Metrics.rem(2, viewport))
             Text(row.value)
                 .font(.system(size: Theme.Metrics.rem(1.15, viewport), weight: .semibold))
-                .foregroundStyle(isFocused ? .black : Theme.textSecondary)
+                .foregroundStyle(isFocused ? Theme.canvas : Theme.textSecondary)
         }
-        .foregroundStyle(isFocused ? .black : Theme.textPrimary)
+        // The same inversion as every other focused pill: light fill, canvas text.
+        .foregroundStyle(isFocused ? Theme.canvas : Theme.textPrimary)
         .padding(.horizontal, Theme.Metrics.rem(1.0, viewport))
         .frame(height: Theme.Metrics.rem(2.6, viewport))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: Theme.Metrics.railPillCorner(viewport), style: .continuous)
+            // A settings row is a plate, not a guide entry — its own radius.
+            RoundedRectangle(cornerRadius: Theme.Metrics.plateCorner(viewport), style: .continuous)
                 .fill(isFocused ? Theme.focusRing : Color.clear)
         }
         .animation(Theme.stateChange, value: isFocused)

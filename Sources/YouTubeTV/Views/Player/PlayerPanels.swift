@@ -47,7 +47,9 @@ struct CaptionOverlay: View {
                     // A solid plate, not a material: captions have to stay legible
                     // over an arbitrary frame, and glass tracks what is behind it.
                     .background(Color.black.opacity(0.75))
-                    .clipShape(RoundedRectangle(cornerRadius: rem(0.3), style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous)
+                        .strokeBorder(Theme.divider.opacity(0.6), lineWidth: 1))
                     .frame(maxWidth: viewport.width * 0.8)
                     .transition(.opacity)
             }
@@ -112,8 +114,12 @@ struct StatsOverlay: View {
         }
         .font(.system(size: rem(0.85), design: .monospaced))
         .padding(rem(1))
+        // Flat black on purpose — numbers over video must not track the frame
+        // behind them. The hairline is what separates "plate" from "debug print".
         .background(Color.black.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: rem(0.5), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.plateCorner(viewport), style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Metrics.plateCorner(viewport), style: .continuous)
+            .strokeBorder(Theme.divider, lineWidth: 1))
         .frame(maxWidth: rem(34), alignment: .leading)
         .allowsHitTesting(false)
     }
@@ -141,6 +147,8 @@ struct DescriptionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: rem(1.0)) {
+            BackChip(action: { model.closeDescription() })
+
             Text(model.title)
                 .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -166,7 +174,7 @@ struct DescriptionPanel: View {
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: rem(1.0), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.sheetCorner(viewport), style: .continuous))
     }
 
     private func body(for text: String) -> some View {
@@ -227,6 +235,9 @@ struct PlaybackErrorPanel: View {
         .padding(rem(2))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.85))
+        // Same hairline as the stats plate: a full-frame black wash with no
+        // edge reads as a failed render, which is exactly what it is reporting.
+        .overlay(Rectangle().strokeBorder(Theme.divider, lineWidth: 1))
     }
 
     /// `retryStatusMessage` is the human-readable line the ladder leaves behind;

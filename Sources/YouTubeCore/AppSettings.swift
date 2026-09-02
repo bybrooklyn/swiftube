@@ -156,6 +156,12 @@ public struct AppSettings: Codable {
     // given video if the embed reports a fatal error (TOSPlayerStateStore.markFallback
     // — see TOSPlayerView.onFallback).
 
+    // MARK: Liquid Glass (macOS port)
+    /// When `false`, the player menu and confirmation dialog draw their flat
+    /// fallback fill instead of `.glassEffect`. Accessibility/performance/taste
+    /// toggle; defaults on. Not upstream — added for the macOS leanback UI.
+    public var liquidGlassEnabled: Bool
+
     // MARK: Schema version
     /// Persisted schema version. Starts at 1 for newly stored settings.
     /// Old JSON lacking this key decodes as 0, signalling a pre-migration store.
@@ -273,6 +279,7 @@ public struct AppSettings: Codable {
         #else
         useTOSPlayerOnMac    = false
         #endif
+        liquidGlassEnabled   = true
         settingsVersion      = 1
     }
 }
@@ -337,6 +344,7 @@ extension AppSettings {
         case preferH264
         case iCloudSyncEnabled
         case useTOSPlayerOnMac
+        case liquidGlassEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -380,5 +388,6 @@ extension AppSettings {
         preferH264                   = c.safeDecode(Bool.self,              forKey: .preferH264,                   default: d.preferH264)
         iCloudSyncEnabled            = c.safeDecode(Bool.self,              forKey: .iCloudSyncEnabled,            default: d.iCloudSyncEnabled)
         useTOSPlayerOnMac            = c.safeDecode(Bool.self,              forKey: .useTOSPlayerOnMac,            default: d.useTOSPlayerOnMac)
+        liquidGlassEnabled           = c.safeDecode(Bool.self,              forKey: .liquidGlassEnabled,           default: d.liquidGlassEnabled)
     }
 }

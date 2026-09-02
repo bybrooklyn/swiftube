@@ -106,6 +106,12 @@ final class SettingsModel {
             self?.mutate { $0.historyState = $0.historyState == .enabled ? .disabled : .enabled }
         })
 
+        rows.append(Row(id: "h.appearance", kind: .header, title: "Appearance"))
+        rows.append(Row(id: "ap.glass", kind: .setting, title: "Liquid Glass effects",
+                        value: settings.liquidGlassEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.liquidGlassEnabled.toggle() }
+        })
+
         rows.append(Row(id: "h.account", kind: .header, title: "Account"))
         rows.append(Row(id: "a.session", kind: .setting,
                         title: auth.isSignedIn ? "Signed in" : "Account",

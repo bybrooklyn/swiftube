@@ -182,7 +182,7 @@ struct ThumbnailView: View {
                 let result = await ThumbnailLoader.shared.image(for: candidate, maxPixel: maxPixel)
                 guard !Task.isCancelled, requested == url else { return }
                 if let result {
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    withAnimation(Theme.stateChange) {
                         loaded = result
                         loadedURL = requested
                     }

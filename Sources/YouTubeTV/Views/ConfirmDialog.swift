@@ -12,6 +12,7 @@ struct ConfirmDialog: View {
     let title: String
     let detail: String
     var symbol: String = "questionmark.circle"
+    var onCancel: () -> Void = {}
 
     @Environment(\.viewportSize) private var viewport
 
@@ -24,6 +25,9 @@ struct ConfirmDialog: View {
             Color.black.opacity(0.6).ignoresSafeArea()
 
             VStack(spacing: rem(0.9)) {
+                BackChip(label: "Cancel", action: onCancel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
                 Image(systemName: symbol)
                     .font(.system(size: rem(2.6), weight: .thin))
                     .foregroundStyle(Theme.textTertiary)
@@ -45,8 +49,11 @@ struct ConfirmDialog: View {
                     .padding(.top, rem(0.4))
             }
             .padding(rem(2.2))
-            .background(Theme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: rem(1), style: .continuous))
+            // Tinted harder than the player menu so a dialog reads as one tier
+            // above a panel, not as another panel.
+            .glassPanel(tint: Theme.surface.opacity(0.75),
+                        fallback: Theme.surface,
+                        corner: Theme.Metrics.sheetCorner(viewport))
         }
     }
 }

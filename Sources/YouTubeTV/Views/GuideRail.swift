@@ -12,8 +12,9 @@ import YouTubeCore
 ///     unlike the real thing.
 ///   * The expanded guide has **no panel colour**; it is the same `#0F0F0F` as
 ///     the page, and the content simply starts further right.
-///   * The focused entry is a **filled `#F1F1F1` rectangle** 18.5rem wide with
-///     its icon and label inverted to dark — not a translucent grey pill.
+///   * The focused entry is a **filled `#F1F1F1` rounded rectangle** with its
+///     icon and label inverted to dark — not a translucent grey pill. (First
+///     drawn square at 18.5rem; narrowed and rounded to match the stock app.)
 ///   * Icons sit at the same x in both states (3.25rem), so opening the guide
 ///     moves only the labels.
 struct GuideRail: View {
