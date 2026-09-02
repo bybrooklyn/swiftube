@@ -80,7 +80,9 @@ public actor VideoPreloadCache {
     // MARK: - LRU cap
 
     /// Maximum number of distinct video IDs kept in memory.
-    private static let maxVideoEntries = 30
+    /// Internal so tests can overflow the cache by exactly one entry rather than
+    /// hardcoding 30 in two places.
+    static let maxVideoEntries = 30
 
     // MARK: - Cache entry
 
@@ -151,7 +153,14 @@ public actor VideoPreloadCache {
     nonisolated private let pathMonitor = NWPathMonitor()
     private var currentPath: NWPath? = nil
 
-    private init(
+    /// Internal rather than private so tests can build an isolated instance.
+    ///
+    /// Everything that touches this cache goes through `.shared`, so every test
+    /// exercising it shared one object — which is part of why the suite needs
+    /// `--no-parallel`, and why those tests embed a random id in every video id
+    /// to dodge collisions. The dependencies were already injectable; only the
+    /// access level stood in the way.
+    init(
         api: InnerTubeAPI = InnerTubeAPI(),
         sponsorBlock: SponsorBlockService = SponsorBlockService(),
         deArrow: DeArrowService = DeArrowService()
@@ -425,6 +434,7 @@ public actor VideoPreloadCache {
         cacheLog.notice("[store] wkHLS \(videoId) origin=\(isPreWarm ? "preWarm" : "liveRace") url=\(url.absoluteString.prefix(80))")
         wkHLSCache[videoId] = CacheEntry(value: url, storedAt: .init(), ttl: 4 * 3_600)
         wkHLSIsPreWarmCache[videoId] = isPreWarm
+        touch(videoId)
     }
 
     /// Returns `true` when the cached wkHLS URL was stored by a background preWarm extraction.
@@ -460,6 +470,7 @@ public actor VideoPreloadCache {
     /// nil-reset that happens at the start of every new `extractHLSURL` call.
     public func store(wkHLSPoToken token: String, for videoId: String) {
         wkHLSPoTokenCache[videoId] = token
+        touch(videoId)
     }
 
     /// Returns the cached pot= token for a video, or nil if none was stored.
@@ -475,6 +486,13 @@ public actor VideoPreloadCache {
         cacheLog.notice("[evict] auth sign-out — clearing trackingCache (\(self.trackingCache.count, privacy: .public) entries) + nextInfoCache (\(self.nextInfoCache.count, privacy: .public) entries)")
         trackingCache.removeAll()
         nextInfoCache.removeAll()
+        // The BotGuard pot= tokens and the manifest URLs they authorise are minted
+        // against the signed-in visitor session, so they outlived the account that
+        // produced them — a signed-out user could still be served from a manifest
+        // authorised for the previous one.
+        wkHLSPoTokenCache.removeAll()
+        wkHLSCache.removeAll()
+        wkHLSIsPreWarmCache.removeAll()
         // BUG-013 fix: also purge disk so nextInfo (likeStatus) cannot be read back after sign-out.
         disk.removeAll()
     }
@@ -580,6 +598,15 @@ public actor VideoPreloadCache {
             deArrowCache.removeValue(forKey: evict)
             prefetchTasks[evict]?.cancel()
             prefetchTasks.removeValue(forKey: evict)
+            // The wkHLS trio deliberately survives `consume()` so a re-play skips
+            // the 5–9 s extraction — but it was outside LRU eviction entirely, and
+            // `store(wkHLSManifestURL:)` never called `touch`. Entries expired only
+            // if something happened to read that same id again, so the maps grew by
+            // one per video ever seen. Eviction is the right bound; the TTL check
+            // in `cachedWKHLSURL` still handles staleness within it.
+            wkHLSCache.removeValue(forKey: evict)
+            wkHLSPoTokenCache.removeValue(forKey: evict)
+            wkHLSIsPreWarmCache.removeValue(forKey: evict)
         }
     }
 

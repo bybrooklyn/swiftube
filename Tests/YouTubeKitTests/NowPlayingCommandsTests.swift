@@ -2,7 +2,12 @@ import Foundation
 import Testing
 @testable import YouTubeMedia
 @testable import YouTubeCore
-#if canImport(UIKit)
+// `canImport(MediaPlayer)`, not `canImport(UIKit)`. MediaPlayer *is* available on
+// macOS — PlaybackViewModel+NowPlaying.swift calls MPRemoteCommandCenter.shared()
+// unguarded, and un-gating Now Playing for macOS is one of the port's headline
+// changes. Gating on UIKit meant these six regression tests for that exact change
+// were compiled out on the only platform this app ships to.
+#if canImport(MediaPlayer)
 import MediaPlayer
 
 /// Tests that setupRemoteCommandCenter registers next/previous track commands and
@@ -101,7 +106,9 @@ struct NowPlayingCommandsTests {
 
         vm.updateNowPlayingInfo()
         // Simulate the fetch completing and setting cachedArtwork.
-        vm.cachedArtwork = UIImage()
+        // `PlatformImage` is the shim PlaybackViewModel actually stores:
+        // UIImage on iOS, NSImage here.
+        vm.cachedArtwork = PlatformImage()
 
         vm.updateNowPlayingInfo()
         // cachedArtwork must still be non-nil (was not reset to nil on the second call).

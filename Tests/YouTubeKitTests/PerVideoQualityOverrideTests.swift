@@ -29,6 +29,11 @@ private final class MockQualityDelegate: QualityContext, QualityEventHandler {
     var isSwappingItem = false
     var isQualityChangePending = false
     func qualityItemDidBecomeReady(_ item: AVPlayerItem, seekTo: TimeInterval) {}
+
+    /// Items the manager asked us to re-observe. A quality switch replaces the
+    /// player item, so the end-of-item and stall observers have to move with it.
+    private(set) var observedItems: [AVPlayerItem] = []
+    func installEndAndStallObservers(for item: AVPlayerItem, endsQualityTransition: Bool) { observedItems.append(item) }
     func qualityItemDidFail(error: Error?, quality: AppSettings.VideoQuality, hasAppliedH264Cap: Bool) async {}
     func qualitySelectDASHFormat(videoURL: URL, audioURL: URL, seekTo: TimeInterval) async {}
 }

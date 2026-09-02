@@ -55,6 +55,13 @@ final class AppModel {
     /// every directional press.
     private(set) var search: SearchModel?
 
+    /// True while the sign-out confirmation is up.
+    ///
+    /// Signing out used to happen on a single Select of the guide's first item —
+    /// the easiest thing in the app to hit by accident, and recovering means the
+    /// whole device-code flow again.
+    private(set) var isConfirmingSignOut = false
+
     private(set) var focus: BrowseFocus = .card(shelf: 0, index: 0)
     private(set) var isRailExpanded = false
 
@@ -75,9 +82,31 @@ final class AppModel {
         self.browse = BrowseViewModel(api: api)
     }
 
+    /// Applies the "Hide Shorts" setting.
+    ///
+    /// The setting had exactly one consumer — a log line — so the toggle in
+    /// Settings did nothing. The predicate itself was already written and tested
+    /// (`HideShortsFilterTests`); it just had no call site in this target.
+    ///
+    /// The Shorts guide entry is exempt: hiding every card on the surface whose
+    /// whole purpose is Shorts would leave the user on a blank page with no
+    /// explanation of why.
+    private func hidingShorts(_ videos: [Video]) -> [Video] {
+        guard settingsStore.settings.hideShorts, selectedRailItem != .shorts else { return videos }
+        return videos.filter { !$0.isShort }
+    }
+
+    private func shelf(id: String, title: String, videos: [Video]) -> Shelf {
+        Shelf(id: id, title: title, videos: hidingShorts(videos))
+    }
+
     var shelves: [Shelf] {
-        if !customShelves.isEmpty { return customShelves }
-        if let channelFeed { return [channelFeed] }
+        if !customShelves.isEmpty {
+            return customShelves.map { shelf(id: $0.id, title: $0.title, videos: $0.videos) }
+        }
+        if let channelFeed {
+            return [shelf(id: channelFeed.id, title: channelFeed.title, videos: channelFeed.videos)]
+        }
 
         // A category surface returns exactly one group, and its title is
         // whatever the fetcher produced. Those fetchers fall back to a plain
@@ -86,13 +115,13 @@ final class AppModel {
         // pages. The section knows its own name; use it.
         if browse.videoGroups.count == 1, selectedRailItem != .home,
            let group = browse.videoGroups.first {
-            return [Shelf(id: "section-\(browse.currentSection.id)",
+            return [shelf(id: "section-\(browse.currentSection.id)",
                           title: browse.currentSection.title,
                           videos: group.videos)]
         }
 
         return browse.videoGroups.enumerated().map { index, group in
-            Shelf(
+            shelf(
                 // Index is part of the id because YouTube repeats shelf titles
                 // within one feed. Keying only on the title gave ForEach
                 // duplicate ids, which SwiftUI resolves by dropping or aliasing
@@ -235,9 +264,18 @@ final class AppModel {
     /// overlays rather than sections and are deliberately not recorded.
     @ObservationIgnored private var sectionHistory: [RailItem] = []
 
+    /// Search and Settings are overlays, not sections. They are excluded from the
+    /// trail on *both* sides: `item` because you never go Back *into* one, and
+    /// `selectedRailItem` because closing one leaves it as the current highlight —
+    /// so opening a real section afterwards used to push `.search` onto the trail,
+    /// and the next Back re-opened the search overlay instead of going back.
+    private static func isOverlay(_ item: RailItem) -> Bool {
+        item == .search || item == .settings
+    }
+
     private func open(_ item: RailItem, recordingHistory: Bool = true) {
         if recordingHistory, item != selectedRailItem,
-           item != .search, item != .settings {
+           !Self.isOverlay(item), !Self.isOverlay(selectedRailItem) {
             sectionHistory.append(selectedRailItem)
             // A guide has a dozen entries and a session can wander; keep the
             // trail short enough that Back stays predictable.
@@ -324,8 +362,13 @@ final class AppModel {
         isRailExpanded = true
     }
 
+    /// Auth state as it was when Settings opened, so `closeSettings` can tell
+    /// whether the account row changed it.
+    @ObservationIgnored private var settingsWasSignedIn = false
+
     func openSettings() {
         isRailExpanded = false
+        settingsWasSignedIn = auth.isSignedIn
         settings = SettingsModel(store: settingsStore, auth: auth) { [weak self] in
             // Sign-in replaces settings rather than stacking on top of it.
             self?.settings = nil
@@ -334,10 +377,17 @@ final class AppModel {
     }
 
     private func closeSettings() {
+        let wasSignedIn = settingsWasSignedIn
         settings = nil
         // Settings changes affect playback, so hand the new values to the
         // player the next time one is created — and to any that is live now.
         player?.playback.updateSettings(settingsStore.settings)
+        // Settings' account row calls auth.signOut() directly, so the four
+        // token holders below never heard about it and kept using a dead token
+        // until the next launch. The guide's own sign-out path already fans out.
+        if wasSignedIn != auth.isSignedIn {
+            Task { await applyAuthChange() }
+        }
         focus = .rail(.settings)
         isRailExpanded = true
     }
@@ -401,7 +451,9 @@ final class AppModel {
                             title: channel.title,
                             videos: group.videos)
         focus = .card(shelf: 0, index: 0)
-        memory = BrowseNavigator.ColumnMemory()
+        // (A second `memory = ColumnMemory()` used to sit here and undo the
+        // `memory.railItem` set above, so Left from a channel's first card opened
+        // the guide on Home instead of on the channel being viewed.)
         isRailExpanded = false
     }
 
@@ -500,6 +552,15 @@ final class AppModel {
             return
         }
 
+        if isConfirmingSignOut {
+            switch intent {
+            case .select: confirmSignOut()
+            case .back:   cancelSignOut()
+            default:      break   // nothing else is aimable, so nothing else acts
+            }
+            return
+        }
+
         if let settings {
             switch intent {
             case let .move(direction): settings.move(direction)
@@ -534,7 +595,7 @@ final class AppModel {
             case let .card(shelf, index):
                 if let video = video(shelf: shelf, index: index) { present(video) }
             case .rail(.account):
-                if auth.isSignedIn { auth.signOut(); Task { await applyAuthChange() } }
+                if auth.isSignedIn { withAnimation(Theme.stateChange) { isConfirmingSignOut = true } }
                 else { isSigningIn = true }
             case let .rail(item):
                 open(item)
@@ -623,11 +684,22 @@ final class AppModel {
         if let video = video(shelf: shelf, index: index) { present(video) }
     }
 
+    func confirmSignOut() {
+        withAnimation(Theme.stateChange) { isConfirmingSignOut = false }
+        guard auth.isSignedIn else { return }
+        auth.signOut()
+        Task { await applyAuthChange() }
+    }
+
+    func cancelSignOut() {
+        withAnimation(Theme.stateChange) { isConfirmingSignOut = false }
+    }
+
     func click(rail item: RailItem) {
         pointerAnchor = .zero
         hover(rail: item)
         if case .account = item {
-            if auth.isSignedIn { auth.signOut(); Task { await applyAuthChange() } }
+            if auth.isSignedIn { withAnimation(Theme.stateChange) { isConfirmingSignOut = true } }
             else { isSigningIn = true }
             return
         }

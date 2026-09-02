@@ -10,7 +10,7 @@ import os.log
 import YouTubeCore
 
 private let proxyScheme = "ytwebhls"
-private let proxyLog = Logger(subsystem: "com.void.smarttube.app", category: "HLSProxy")
+private let proxyLog = Logger(subsystem: appSubsystem, category: "HLSProxy")
 
 // MARK: - URL scheme helpers
 

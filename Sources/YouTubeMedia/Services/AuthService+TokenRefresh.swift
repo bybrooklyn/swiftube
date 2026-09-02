@@ -6,6 +6,7 @@ extension AuthService {
     // MARK: - Token refresh
 
     func refreshAccessToken(refreshToken: String, creds: YouTubeClientCredentials) async throws {
+        let epoch = authEpoch
         var req = URLRequest(url: Self.tokenURL)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -17,6 +18,16 @@ extension AuthService {
         ])
 
         let (data, response) = try await URLSession.shared.data(for: req)
+
+        // The session may have been torn down while this request was in flight
+        // (signOut / clearSession / a fresh beginSignIn). Applying the response
+        // now would set isSignedIn back to true and persist tokens the user
+        // just cleared — the save Task lands on TokenManager after the clear.
+        guard epoch == authEpoch else {
+            authLog.notice("refreshAccessToken: auth epoch changed mid-flight — discarding response")
+            throw AuthError.superseded
+        }
+
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         // Detect permanent refresh-token failures (revoked, expired, invalid credentials).

@@ -63,6 +63,16 @@ struct RootView: View {
                         .zIndex(3)
                 }
 
+                if model.isConfirmingSignOut {
+                    ConfirmDialog(
+                        title: "Sign out of YouTube?",
+                        detail: "Your home feed and subscriptions go back to signed-out, and signing back in means approving a device code again.",
+                        symbol: "person.crop.circle.badge.xmark"
+                    )
+                    .transition(.opacity)
+                    .zIndex(4)
+                }
+
                 if model.isSigningIn {
                     SignInView(auth: model.auth) { model.finishSignIn() }
                         .zIndex(2)

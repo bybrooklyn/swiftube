@@ -22,8 +22,10 @@ a pipeline ported from [SmartTubeIOS](https://github.com/bybrooklyn/SmartTubeIOS
   playback speed, audio-track selection, and an up-next rail that autoplays.
 - **SponsorBlock**, per category, each set to skip / toast / off.
 - **DeArrow** titles where available.
-- **Sign-in** over the OAuth device-code flow — no password is typed into the
-  app and nothing touches the Keychain.
+- **Sign-in** over the OAuth device-code flow — no password is ever typed into
+  the app. The resulting tokens *are* kept in the Keychain, which is why
+  `just setup-signing` is not optional: Keychain ties an item to the signing
+  identity that created it.
 - **Steam integration** — an installer that registers the app as a
   non-Steam game with generated artwork.
 
@@ -73,6 +75,9 @@ Designed for a d-pad first; the keyboard mirrors it, and the pointer works too.
 | Player menu | `M` |
 | Quit | ⌘Q |
 
+Play/pause, seek and the player menu are player-only; on the browse surface
+those keys do nothing. Seek uses the intervals set in Settings.
+
 Back retraces where you have been: it leaves the guide for the content behind
 it, returns from a section to the previous one, and opens the guide from home.
 
@@ -111,9 +116,16 @@ Browsing, search, settings, sign-in, the guide, channel pages, the player with
 its menu, up-next and comments all work, and **playback runs at 1080p** over
 VisionOS HLS.
 
-Not done: descriptions and the stats overlay in the player are still buttons
-without surfaces, comments are one page with no continuation, and channel pages
-show uploads rather than tabs for playlists. `CLAUDE.md` has the playback traps
+Descriptions, the stats overlay, on-screen captions and a playback-failure
+screen with a retry all have surfaces now, and the up-next rail is populated
+again — YouTube moved the watch page's secondary column from
+`compactVideoRenderer` to `lockupViewModel`, which the parser did not know about,
+so related videos had been coming back empty on every video.
+
+Not done: comments are one page with no continuation; channel pages show uploads
+rather than tabs for playlists, shorts and live; the Library's playlist cards
+still hand a playlist id to `/player` as if it were a video id; and Shorts render
+in 16:9 cards rather than a vertical surface. `CLAUDE.md` has the playback traps
 worth reading before touching that pipeline.
 
 **Signed out, YouTube returns an empty home feed.** The app then builds home
@@ -127,7 +139,7 @@ equivalent, so run `just signin` to get yours.
 just test
 ```
 
-831 tests. `--no-parallel` is load-bearing: the suites inherited from
+904 tests. `--no-parallel` is load-bearing: the suites inherited from
 SmartTubeIOS share global singletons and fail randomly when run concurrently.
 
 ## Licence

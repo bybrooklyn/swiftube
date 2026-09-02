@@ -133,6 +133,14 @@ extension PlaybackViewModel {
             Task { @MainActor [weak self] in self?.playPrevious() }
             return .success
         }
+
+        // `MPRemoteCommand.isEnabled` defaults to true and `addTarget` does not
+        // change it, so between here and the first `updateNowPlayingInfo()` the
+        // system's skip buttons were live with nothing to skip to — pressing one
+        // called playNext()/playPrevious() against an empty queue. Seed them from
+        // the real state; updateNowPlayingInfo keeps them in step from then on.
+        center.nextTrackCommand.isEnabled = hasNext
+        center.previousTrackCommand.isEnabled = hasPrevious
     }
 
     func updateNowPlayingInfo() {

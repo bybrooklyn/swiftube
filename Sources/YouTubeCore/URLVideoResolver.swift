@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let resolverLog = Logger(subsystem: "com.void.smarttube", category: "URLVideoResolver")
+private let resolverLog = Logger(subsystem: appSubsystem, category: "URLVideoResolver")
 
 // MARK: - URLVideoResolver
 

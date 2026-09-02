@@ -79,6 +79,11 @@ extension AuthService {
                 authLog.notice("slow_down received — waiting extra 5s")
                 try? await Task.sleep(nanoseconds: UInt64(5 * 1_000_000_000))
                 continue
+            } catch AuthError.superseded {
+                // Sign-in was cancelled or restarted mid-exchange. Not an
+                // error from the user's perspective — exit quietly.
+                authLog.notice("exchange superseded by auth-state change — stopping poll")
+                return
             } catch let urlError as URLError {
                 authLog.notice("Network error during poll (transient, retrying): \(urlError.localizedDescription)")
                 continue
@@ -95,6 +100,7 @@ extension AuthService {
     }
 
     func exchangeDeviceCode(deviceCode: String, creds: YouTubeClientCredentials) async throws {
+        let epoch = authEpoch
         var req = URLRequest(url: Self.tokenURL)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -106,6 +112,15 @@ extension AuthService {
         ])
 
         let (data, response) = try await URLSession.shared.data(for: req)
+
+        // Sign-in was cancelled or restarted while this exchange was in flight;
+        // applying the tokens now would complete a sign-in the user walked away
+        // from (and persist them after clearKeychain's Task ran).
+        guard epoch == authEpoch else {
+            authLog.notice("exchangeDeviceCode: auth epoch changed mid-flight — discarding response")
+            throw AuthError.superseded
+        }
+
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

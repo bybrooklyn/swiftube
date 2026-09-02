@@ -32,7 +32,28 @@ extension InnerTubeAPI {
         if let runs = dict["runs"] as? [[String: Any]] {
             return runs.compactMap { $0["text"] as? String }.joined()
         }
+        // The ViewModel-era shape: {"content": "…"}. YouTube's newer renderers
+        // (pageHeaderViewModel, lockupMetadataViewModel, contentMetadataViewModel)
+        // use it instead of simpleText/runs. Four call sites had learned to try
+        // `["content"]` themselves; the helper had not, so everywhere else — most
+        // visibly `parseChannel`'s title, which came back as "" — saw nil.
+        if let content = dict["content"] as? String { return content }
         return nil
+    }
+
+    /// A view count, or nil when the string is not one.
+    ///
+    /// `extractNumber` on its own is not enough: it falls through the K/M/B branch
+    /// and then strips non-digits, so "2 days ago" reads as **2**. TVHTML5 tiles
+    /// frequently render a metadata line with only a relative date and no view
+    /// count, so those videos were getting a view count of 2, 3 or 5. The sibling
+    /// `publishedAt` loops avoid this by demanding "N <unit> ago"; this demands a
+    /// view-count marker. Requests go out with `hl: "en"`, so the marker is stable.
+    func extractViewCount(_ text: String) -> Int? {
+        let lowered = text.lowercased()
+        // "watching" covers a live stream's concurrent-viewer line.
+        guard lowered.contains("view") || lowered.contains("watching") else { return nil }
+        return extractNumber(text)
     }
 
     /// For collab videos YouTube renders the author line as multiple runs, e.g.

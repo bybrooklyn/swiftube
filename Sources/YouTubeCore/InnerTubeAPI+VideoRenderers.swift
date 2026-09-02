@@ -219,6 +219,7 @@ extension InnerTubeAPI {
         // Handles WEB (videoRenderer, richItemRenderer, compactVideoRenderer),
         // WEB grid (gridVideoRenderer), and TVHTML5 tileRenderer (subs/history/home on TV client).
         // Matches Android MediaServiceCore ItemWrapper renderer dispatch order.
+        var depthLimitHits = 0
         func walk(_ obj: Any, depth: Int = 0) {
             // Limit recursion depth to guard against unbounded/cyclic structures, while still
             // covering all known YouTube structures: WEB client reaches depth ~6, TVHTML5
@@ -227,7 +228,15 @@ extension InnerTubeAPI {
             // "tabs" layer (one tab per subscribed channel) — needs depth 13 to reach tileRenderer.
             // 16 leaves a little headroom above that.
             guard depth < 16 else {
-                tubeLog.warning("parseVideoGroup: walk depth limit (16) reached — skipping subtree")
+                // Counted, not logged per hit. This guard fires constantly and
+                // almost always harmlessly: a YouTube response nests ~38 levels
+                // deep, but that depth is accessibility labels, tracking params and
+                // command metadata — measured against a live search and /next on
+                // 2026-08-21, every videoRenderer sat at depth 9–14 and every
+                // lockupViewModel at 6–9, all inside the limit. Logging each one
+                // put ~265 warning lines into the log per home load and buried the
+                // diagnostics that matter. The total is reported once, below.
+                depthLimitHits += 1
                 return
             }
             if let dict = obj as? [String: Any] {
@@ -425,6 +434,9 @@ extension InnerTubeAPI {
         let shortsCount = videos.filter { $0.isShort }.count
         let hitsDesc = rendererHits.sorted(by: { $0.key < $1.key }).map { "\($0.key)=\($0.value)" }.joined(separator: " ")
         let missDesc = rendererMisses.sorted(by: { $0.key < $1.key }).map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+        if depthLimitHits > 0 {
+            tubeLog.debug("parseVideoGroup '\(title ?? "nil", privacy: .public)': depth limit (16) reached on \(depthLimitHits, privacy: .public) subtrees")
+        }
         tubeLog.notice("parseVideoGroup '\(title ?? "nil", privacy: .public)' → \(videos.count, privacy: .public) videos (\(videos.count - shortsCount, privacy: .public) regular, \(shortsCount, privacy: .public) shorts), nextPage=\(nextPageToken != nil ? "yes" : "no", privacy: .public) | hits: \(hitsDesc.isEmpty ? "none" : hitsDesc, privacy: .public) | misses: \(missDesc.isEmpty ? "none" : missDesc, privacy: .public)")
         return VideoGroup(title: title, videos: videos, nextPageToken: nextPageToken)
     }
@@ -678,7 +690,7 @@ extension InnerTubeAPI {
                         guard let text = (item["lineItemRenderer"] as? [String: Any])?["text"] as? [String: Any],
                               let str = extractText(text)
                         else { continue }
-                        if let count = extractNumber(str) { return count }
+                        if let count = extractViewCount(str) { return count }
                     }
                 }
                 return nil
@@ -695,7 +707,9 @@ extension InnerTubeAPI {
 
     // MARK: – WEB lockupViewModel parser (Android LockupItem methodology)
     // Mirrors: LockupItem.getVideoId(), getTitle(), getThumbnails() in CommonHelper.kt
-    private func parseLockupViewModel(_ lockup: [String: Any]) -> Video? {
+    // Not private: `parseRelatedVideos` in InnerTubeAPI+Social.swift needs it —
+    // the watch page's secondary column is lockupViewModel now, not compactVideoRenderer.
+    func parseLockupViewModel(_ lockup: [String: Any]) -> Video? {
         // videoId: rendererContext.commandContext.onTap.innertubeCommand.{watchEndpoint|reelWatchEndpoint}.videoId
         // Shorts use reelWatchEndpoint; regular videos use watchEndpoint.
         guard let rendererContext = lockup["rendererContext"] as? [String: Any],
@@ -812,7 +826,7 @@ extension InnerTubeAPI {
                         guard let text = part["text"] as? [String: Any],
                               let str = text["content"] as? String ?? extractText(text)
                         else { continue }
-                        if let count = extractNumber(str) { return count }
+                        if let count = extractViewCount(str) { return count }
                     }
                 }
                 return nil
@@ -1111,7 +1125,8 @@ extension InnerTubeAPI {
     //   viewCount: overlayMetadata.secondaryText.content  (e.g. "3.3K views")
     //   thumbnail: onTap.innertubeCommand.reelWatchEndpoint.thumbnail.thumbnails[-1].url
     //              or thumbnailViewModel.image.sources[-1].url as fallback
-    private func parseShortsLockupViewModel(_ r: [String: Any]) -> Video? {
+    // Not private: see parseLockupViewModel — related Shorts arrive in the same list.
+    func parseShortsLockupViewModel(_ r: [String: Any]) -> Video? {
         // videoId — from reelWatchEndpoint inside onTap.innertubeCommand
         guard let onTap = r["onTap"] as? [String: Any],
               let command = onTap["innertubeCommand"] as? [String: Any],

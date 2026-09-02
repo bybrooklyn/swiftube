@@ -35,6 +35,14 @@ extension PlaybackViewModel {
     }
 
     func setupRateObserver() {
+        // Not idempotent by itself: overwriting the token leaves the previous
+        // NSKeyValueObservation installed (it only dies on invalidate()), and
+        // loadAsync() calls this on every video transition — none of which go
+        // through stop()/suspend(). Each leaked copy fired the stall logic,
+        // multiplying stallCount per event and triggering premature
+        // exhaustiveRetry escalations. Drop any live observer first.
+        rateObserver?.invalidate()
+        rateObserver = nil
         // KVO on player.rate so isPlaying stays in sync when the system externally
         // pauses the player (e.g. headphones removed, audio session interruption ends
         // without shouldResume). Without this, isPlaying stays true while the player
@@ -118,6 +126,92 @@ extension PlaybackViewModel {
                                     self.isPlaying = true
                                     playerLog.notice("[rateObserver] recovery#\(recoveryCount): rate restored, isPlaying=true")
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Installs the end-of-item and stall observers for `item`.
+    ///
+    /// Every path that calls `player.replaceCurrentItem(with:)` must call this
+    /// immediately before the swap. It used to be written out inline, and only in
+    /// three of the ten places that swap an item — the primary iOS-HLS load, the
+    /// local-file load and the parked-item re-open. Every rung of `exhaustiveRetry`
+    /// was missing it, **including the VisionOS+HLS rung that CLAUDE.md documents
+    /// as the only one that works on macOS**. The visible consequence: a video that
+    /// played through the fallback ladder reached its end and simply sat there —
+    /// `handlePlaybackEnd()` never ran, so autoplay and the up-next queue never
+    /// advanced, `videoEnded` stayed false so the play button would not restart it,
+    /// and a mid-video stall was never noticed or recovered from.
+    ///
+    /// `endsQualityTransition` clears `isQualityChangePending`. Every caller except the
+    /// quality manager is swapping in a *replacement* item, which settles any transition
+    /// that was in flight. The flag gates the periodic time observer
+    /// (`setupTimeObserver`, above), and it was only ever cleared on the success path —
+    /// so a quality switch that failed, or one that was rescued by the retry ladder, left
+    /// it stuck true and froze `currentTime` for the rest of the session: dead scrubber,
+    /// no SponsorBlock skips, no caption cues.
+    func installEndAndStallObservers(for item: AVPlayerItem, endsQualityTransition: Bool = true) {
+        if endsQualityTransition { isQualityChangePending = false }
+        endObserverTask?.cancel()
+        endObserverTask = Task { [weak self, item] in
+            let notifications = NotificationCenter.default.notifications(
+                named: AVPlayerItem.didPlayToEndTimeNotification,
+                object: item
+            )
+            for await _ in notifications {
+                guard let self, !Task.isCancelled else { return }
+                self.handlePlaybackEnd()
+            }
+        }
+
+        // Stalls are recorded as non-fatals (bug #193) and then recovered from.
+        stallObserverTask?.cancel()
+        stallObserverTask = Task { @MainActor [weak self, item] in
+            let notifications = NotificationCenter.default.notifications(
+                named: AVPlayerItem.playbackStalledNotification,
+                object: item
+            )
+            for await _ in notifications {
+                guard let self, !Task.isCancelled else { return }
+                self.stallCount += 1
+                let t = Int(self.currentTime)
+                playerLog.notice("[stall] AVPlayerItemPlaybackStalled at t=\(t)s stall#\(self.stallCount) video=\(self.currentVideo?.id ?? "unknown")")
+                let stallError = NSError(
+                    domain: "SmartTube.PlaybackStall",
+                    code: 0,
+                    userInfo: [NSLocalizedDescriptionKey: "AVPlayerItemPlaybackStalled at t=\(t)s (stall #\(self.stallCount))"]
+                )
+                playerLog.recordNonFatal(stallError, userInfo: [
+                    "video_id":       self.currentVideo?.id ?? "unknown",
+                    "stall_at_time":  String(t),
+                    "stall_count":    String(self.stallCount),
+                    "video_duration": String(Int(self.duration)),
+                    "stall_trigger":  "AVPlayerItemPlaybackStalled"
+                ])
+                // Stall recovery (#193): wait 2 s for AVPlayer to self-heal;
+                // if still stalled, nudge the pipeline with a near-zero seek
+                // + explicit rate restore. Capped at 3 attempts per item.
+                let recoveryCount = self.stallCount
+                if recoveryCount <= 3 {
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard let self, self.isPlaying, self.player.rate == 0,
+                              !self.isQualityChangePending else { return }
+                        let seekT = self.currentTime
+                        playerLog.notice("[stall] recovery#\(recoveryCount): seeking to \(seekT)s to flush pipeline")
+                        self.player.seek(
+                            to: CMTime(seconds: seekT, preferredTimescale: 600),
+                            toleranceBefore: .zero,
+                            toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600)
+                        ) { [weak self] _ in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.isPlaying else { return }
+                                self.player.rate = Float(self.settings.playbackSpeed)
+                                playerLog.notice("[stall] recovery#\(recoveryCount): rate restored")
                             }
                         }
                     }
