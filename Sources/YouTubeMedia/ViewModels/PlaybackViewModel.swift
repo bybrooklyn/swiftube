@@ -548,6 +548,16 @@ public final class PlaybackViewModel {
     public var currentVideoId: String? { currentVideo?.id }
 
     public func updateSettings(_ newSettings: AppSettings) {
+        // `setPlaybackSpeed`'s own comment explains why this field specifically
+        // has to survive: it is the only place the in-player speed pick lives,
+        // and every rate-restore path reads it. `newSettings` is the caller's
+        // copy (from SettingsStore), which doesn't know about that live
+        // override — a wholesale replace here re-snaps mid-stall/quality-switch
+        // speed back to whatever was last saved, exactly what that fix exists
+        // to prevent. A bandwidth-path change (pathDidChange) was doing exactly
+        // that by calling this.
+        var newSettings = newSettings
+        newSettings.playbackSpeed = settings.playbackSpeed
         settings = newSettings
         isAudioOnlyMode = newSettings.audioOnlyMode
     }

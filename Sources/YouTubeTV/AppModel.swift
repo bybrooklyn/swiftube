@@ -215,7 +215,17 @@ final class AppModel {
                 "tray")
     }
 
+    @ObservationIgnored private var didStart = false
+
     func start() {
+        // Called from a `.task`, which SwiftUI can re-run (see
+        // GamepadReader's own note on this) — without this guard a second
+        // run double-starts `pathMonitor`, opens a second consumer on
+        // `auth.tokenManager.updates` (single-continuation, so events split
+        // between the two), and re-fires the YOUTUBETV_PLAY/_STATE test seams.
+        guard !didStart else { return }
+        didStart = true
+
         // A test seam, not a feature. Screens are otherwise only reachable by
         // navigating with a controller, which makes them impossible to verify
         // without synthetic key events — and those proved unreliable enough to

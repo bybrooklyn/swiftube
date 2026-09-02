@@ -46,8 +46,6 @@ struct CardMenuView: View {
                                 .fill(isFocused ? Theme.focusRing : .clear)
                         }
                         .contentShape(.rect)
-                        .onHover { if $0 { model.hover(index) } }
-                        .onTapGesture { model.hover(index); model.select() }
                         .animation(Theme.stateChange, value: isFocused)
                     }
                 }

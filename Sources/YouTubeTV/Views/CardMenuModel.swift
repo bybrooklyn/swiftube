@@ -35,11 +35,6 @@ final class CardMenuModel {
         }
     }
 
-    func hover(_ row: Int) {
-        guard rows.indices.contains(row) else { return }
-        index = row
-    }
-
     func select() {
         guard rows.indices.contains(index) else { return }
         rows[index].action()

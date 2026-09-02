@@ -208,6 +208,19 @@ final class SettingsModel {
         var settings = store.settings
         change(&settings)
         store.settings = settings
+        clampFocusedRow()
+    }
+
+    /// A toggle can remove rows out from under the cursor (SponsorBlock alone
+    /// drops ~10 when turned off) — `focusedRow` is a raw index into a list
+    /// `rows` recomputes live from settings, so it needs re-checking after
+    /// every mutation, not just left to point at whatever used to be there.
+    private func clampFocusedRow() {
+        let rows = rows
+        guard rows.indices.contains(focusedRow), rows[focusedRow].kind == .setting else {
+            focusedRow = nextSelectable(from: -1, step: 1, in: rows) ?? 0
+            return
+        }
     }
 
     private func cycle<Value: Equatable>(
