@@ -11,6 +11,9 @@ struct RootView: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 Theme.canvas.ignoresSafeArea()
+                if model.settingsStore.settings.ambientBackdropEnabled {
+                    AmbientBackdrop(url: model.focusedThumbnailURL)
+                }
 
                 VStack(alignment: .leading, spacing: 0) {
                     TopBar(focus: model.focus,

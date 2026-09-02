@@ -120,11 +120,35 @@ final class SettingsModel {
                         value: settings.historyState == .enabled ? "On" : "Off") { [weak self] in
             self?.mutate { $0.historyState = $0.historyState == .enabled ? .disabled : .enabled }
         })
+        rows.append(Row(id: "c.focus", kind: .setting, title: "Focus mode",
+                        value: settings.focusModeEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.focusModeEnabled.toggle() }
+        })
+        rows.append(Row(id: "c.bandwidth", kind: .setting, title: "Bandwidth",
+                        value: settings.bandwidthProfile.label) { [weak self] in
+            self?.cycle(AppSettings.BandwidthProfile.allCases, current: { $0.bandwidthProfile }) {
+                $0.bandwidthProfile = $1
+            }
+        })
+
+        rows.append(Row(id: "h.captions", kind: .header, title: "Captions"))
+        rows.append(Row(id: "cc.size", kind: .setting, title: "Caption size",
+                        value: "\(Int(settings.captionScale * 100))%") { [weak self] in
+            self?.cycle([1.0, 1.25, 1.5], current: { $0.captionScale }) { $0.captionScale = $1 }
+        })
+        rows.append(Row(id: "cc.background", kind: .setting, title: "Caption background",
+                        value: settings.captionOpaqueBackground ? "Solid" : "Translucent") { [weak self] in
+            self?.mutate { $0.captionOpaqueBackground.toggle() }
+        })
 
         rows.append(Row(id: "h.appearance", kind: .header, title: "Appearance"))
         rows.append(Row(id: "ap.glass", kind: .setting, title: "Liquid Glass effects",
                         value: settings.liquidGlassEnabled ? "On" : "Off") { [weak self] in
             self?.mutate { $0.liquidGlassEnabled.toggle() }
+        })
+        rows.append(Row(id: "ap.ambient", kind: .setting, title: "Ambient backdrop",
+                        value: settings.ambientBackdropEnabled ? "On" : "Off") { [weak self] in
+            self?.mutate { $0.ambientBackdropEnabled.toggle() }
         })
 
         rows.append(Row(id: "h.account", kind: .header, title: "Account"))

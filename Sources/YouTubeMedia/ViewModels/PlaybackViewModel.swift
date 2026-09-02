@@ -407,6 +407,24 @@ public final class PlaybackViewModel {
     // playback resumes in <0.1s. Cleared when a different video is requested.
     var parkedVideoId: String?
 
+    /// The last few AVPlayerItems `stop()` left ready, newest last, so Back
+    /// and then reopening any of the last three videos is the same fast path
+    /// as reopening the last one. macOS port; `parkedVideoId` still names the
+    /// most recent.
+    var parkedItems: [(id: String, item: AVPlayerItem)] = []
+    static let parkedItemLimit = 3
+
+    func park(_ id: String, _ item: AVPlayerItem) {
+        parkedItems.removeAll { $0.id == id }
+        parkedItems.append((id, item))
+        if parkedItems.count > Self.parkedItemLimit { parkedItems.removeFirst() }
+    }
+
+    func takeParked(_ id: String) -> AVPlayerItem? {
+        guard let index = parkedItems.firstIndex(where: { $0.id == id }) else { return nil }
+        return parkedItems.remove(at: index).item
+    }
+
     // MARK: - Now Playing cache
     // Never read nowPlayingInfo back from MPNowPlayingInfoCenter — doing a
     // read-modify-write while MediaPlayer is processing on its accessQueue

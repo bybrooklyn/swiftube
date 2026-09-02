@@ -67,7 +67,7 @@ final class PlayerModel {
     /// What plays next. `PlaybackViewModel` already fills this from `/next` and
     /// already autoplays the first entry when a video ends — until now nothing
     /// ever showed it, so playback looked like a dead end even though it was not.
-    var upNext: [Video] { playback.relatedVideos }
+    var upNext: [Video] { playback.settings.focusModeEnabled ? [] : playback.relatedVideos }
 
     // MARK: - Comments
 

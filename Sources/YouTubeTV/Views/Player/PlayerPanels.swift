@@ -38,7 +38,7 @@ struct CaptionOverlay: View {
             Spacer(minLength: 0)
             if let cue = playback.currentCaptionCue, !cue.text.isEmpty {
                 Text(cue.text)
-                    .font(.system(size: rem(1.6), weight: .medium))
+                    .font(.system(size: rem(1.6) * playback.settings.captionScale, weight: .medium))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
@@ -46,7 +46,7 @@ struct CaptionOverlay: View {
                     .padding(.vertical, rem(0.45))
                     // A solid plate, not a material: captions have to stay legible
                     // over an arbitrary frame, and glass tracks what is behind it.
-                    .background(Color.black.opacity(0.75))
+                    .background(Color.black.opacity(playback.settings.captionOpaqueBackground ? 1 : 0.75))
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Theme.Metrics.badgeCorner(viewport), style: .continuous)
                         .strokeBorder(Theme.divider.opacity(0.6), lineWidth: 1))
