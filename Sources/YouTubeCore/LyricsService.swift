@@ -142,8 +142,9 @@ public actor LyricsService {
         pinned[id] = lyrics
         if pinned.count > Self.pinnedLimit {
             // No access times are kept, so evict arbitrarily rather than build a
-            // second index for a cap that is unlikely ever to be reached.
-            for key in pinned.keys.prefix(pinned.count - Self.pinnedLimit) {
+            // second index for a cap that is unlikely ever to be reached — but
+            // never the entry `pin` was just asked to save.
+            for key in pinned.keys.filter({ $0 != id }).prefix(pinned.count - Self.pinnedLimit) {
                 pinned.removeValue(forKey: key)
             }
         }
