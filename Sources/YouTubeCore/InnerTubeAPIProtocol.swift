@@ -46,6 +46,7 @@ public protocol InnerTubeAPIProtocol: AnyObject, Sendable {
     // MARK: Search
     func search(query: String, continuationToken: String?, filter: SearchFilter) async throws -> VideoGroup
     func fetchSearchSuggestions(query: String) async throws -> [String]
+    func searchChannels(query: String) async throws -> [Channel]
 
     // MARK: Playlist
     func fetchPlaylistVideos(playlistId: String, continuationToken: String?) async throws -> VideoGroup
@@ -64,6 +65,10 @@ public protocol InnerTubeAPIProtocol: AnyObject, Sendable {
 public extension InnerTubeAPIProtocol {
 
     /// Fetches the flat recommended home feed from the first page.
+    /// Channels-only search. Defaulted so existing conformers (test doubles)
+    /// need not implement it; `InnerTubeAPI` overrides with the real call.
+    func searchChannels(query: String) async throws -> [Channel] { [] }
+
     func fetchHome() async throws -> VideoGroup {
         try await fetchHome(continuationToken: nil)
     }

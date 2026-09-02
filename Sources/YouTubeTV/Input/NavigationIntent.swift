@@ -15,6 +15,11 @@ public enum NavigationIntent: Equatable, Sendable {
     case menu
     case playPause
     case seek(SeekDirection)
+    /// A typed character, only while a text field (search, the comment
+    /// composer) is up — the keyboard reader asks before emitting these, so
+    /// the m/j/k/l shortcuts keep working everywhere else. `"\u{8}"` is
+    /// backspace.
+    case text(String)
 }
 
 public enum SeekDirection: Equatable, Sendable {

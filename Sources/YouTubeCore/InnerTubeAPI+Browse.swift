@@ -398,6 +398,17 @@ extension InnerTubeAPI {
         return try await search(query: "sports")
     }
 
+    /// Channels matching `query`, for the search surface's Channels row.
+    /// The WEB channels-only filter and the same renderer parser the
+    /// subscriptions tab uses. Not upstream.
+    public func searchChannels(query: String) async throws -> [Channel] {
+        var body = makeBody(client: webClientContext)
+        body["query"] = query
+        body["params"] = "EgIQAg%3D%3D"   // channels only
+        let data = try await post(endpoint: "search", body: body)
+        return parseChannelRenderers(from: data)
+    }
+
     /// Trending, for the macOS Explore surface. `FEtrending` is a real
     /// TVHTML5 browse id; the search fallback mirrors the other categories.
     /// Not upstream.

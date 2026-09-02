@@ -45,6 +45,17 @@ final class CommentComposer {
         return false
     }
 
+    /// A physical keyboard: characters go straight into the text.
+    func type(_ text: String) {
+        guard !isPosting else { return }
+        failure = nil
+        if text == "\u{8}" {
+            if !self.text.isEmpty { self.text.removeLast() }
+        } else {
+            self.text += text
+        }
+    }
+
     func beginPosting() { isPosting = true; failure = nil }
 
     func fail(_ reason: String) { isPosting = false; failure = reason }

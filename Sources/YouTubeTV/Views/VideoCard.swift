@@ -38,6 +38,32 @@ struct VideoCard: View {
 
     private var thumbnail: some View {
         ZStack(alignment: .bottomTrailing) {
+            if video.isChannelTile {
+                // A channel result is a round avatar on a plain tile, the way
+                // the real client draws channels in search.
+                ZStack {
+                    RoundedRectangle(cornerRadius: corner).fill(Theme.surface)
+                    ThumbnailView(url: video.thumbnailURL, fallbacks: [], maxPixel: 240)
+                        .frame(width: thumbHeight * 0.62, height: thumbHeight * 0.62)
+                        .clipShape(Circle())
+                }
+                .frame(width: width, height: thumbHeight)
+            } else {
+                thumbnailImage
+            }
+        }
+        .overlay {
+            // Drawn outside the thumbnail rather than on its edge, so the ring
+            // never eats into the image.
+            RoundedRectangle(cornerRadius: corner + ringInset)
+                .strokeBorder(Theme.focusRing, lineWidth: isFocused ? ring : 0)
+                .padding(-ringInset)
+        }
+        .animation(Theme.stateChange, value: isFocused)
+    }
+
+    private var thumbnailImage: some View {
+        ZStack(alignment: .bottomTrailing) {
             ThumbnailView(url: video.thumbnailURL, fallbacks: video.thumbnailFallbackURLs)
                 .frame(width: width, height: thumbHeight)
                 .clipShape(.rect(cornerRadius: corner))
@@ -67,14 +93,6 @@ struct VideoCard: View {
                 durationBadge(formatDuration(duration), fill: Theme.durationBadge)
             }
         }
-        .overlay {
-            // Drawn outside the thumbnail rather than on its edge, so the ring
-            // never eats into the image.
-            RoundedRectangle(cornerRadius: corner + ringInset)
-                .strokeBorder(Theme.focusRing, lineWidth: isFocused ? ring : 0)
-                .padding(-ringInset)
-        }
-        .animation(Theme.stateChange, value: isFocused)
     }
 
     private func durationBadge(_ text: String, fill: Color) -> some View {

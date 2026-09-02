@@ -7,6 +7,12 @@ final class InputRouter {
     private let gamepad = GamepadReader()
     private let keyboard = KeyboardReader()
 
+    /// See `KeyboardReader.isTextEntryActive`.
+    var isTextEntryActive: () -> Bool {
+        get { keyboard.isTextEntryActive }
+        set { keyboard.isTextEntryActive = newValue }
+    }
+
     func start(_ handler: @escaping (NavigationIntent) -> Void) {
         gamepad.start(handler)
         keyboard.start(handler)

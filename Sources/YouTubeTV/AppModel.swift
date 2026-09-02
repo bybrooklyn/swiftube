@@ -241,6 +241,12 @@ final class AppModel {
         input.start { [weak self] intent in
             self?.handle(intent)
         }
+        // Letters type while search or the comment composer is up; otherwise
+        // they stay the m/j/k/l shortcuts.
+        input.isTextEntryActive = { [weak self] in
+            guard let self else { return false }
+            return search != nil || (player?.composer != nil && !isPlayerDetached)
+        }
 
         // Bandwidth follows the live path: an expensive or constrained link
         // drops Balanced to Data saver until it clears.
@@ -852,8 +858,19 @@ final class AppModel {
             switch intent {
             case let .move(direction): search.move(direction)
             case .select:
-                // Selecting a result plays it; selecting a key types it.
-                if let video = search.focusedResult { present(video) } else { search.select() }
+                // Selecting a result plays it (or opens the channel); selecting
+                // a key types it.
+                if let video = search.focusedResult {
+                    if video.isChannelTile {
+                        closeSearch()
+                        open(.channel(video.id))
+                    } else {
+                        present(video)
+                    }
+                } else {
+                    search.select()
+                }
+            case let .text(text):      search.type(text)
             case .back:                closeSearch()
             default:                   break
             }
@@ -958,9 +975,16 @@ final class AppModel {
                 openCardMenu(for: video)
             }
 
-        case .playPause, .seek:
+        case .playPause, .seek, .text:
             break
         }
+    }
+
+    /// Brings a detached player's chrome back (the menu-bar controller's
+    /// "Show player").
+    func reattachPlayer() {
+        guard player != nil else { return }
+        withAnimation(Theme.travel) { isPlayerDetached = false }
     }
 
     // MARK: - Pointer

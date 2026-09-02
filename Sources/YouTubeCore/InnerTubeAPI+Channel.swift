@@ -330,7 +330,9 @@ extension InnerTubeAPI {
     //
     // Handles channelRenderer, gridChannelRenderer, compactChannelRenderer, and
     // TVHTML5 tileRenderer with TILE_CONTENT_TYPE_CHANNEL.
-    private func parseChannelRenderers(from json: [String: Any]) -> [Channel] {
+    // Internal rather than private: `searchChannels` (+Browse.swift) parses
+    // the same renderers out of a search response.
+    func parseChannelRenderers(from json: [String: Any]) -> [Channel] {
         var channels: [Channel] = []
         var seen = Set<String>()
         // Collect all distinct renderer key names encountered for diagnostics

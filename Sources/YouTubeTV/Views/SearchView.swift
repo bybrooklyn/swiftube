@@ -54,35 +54,60 @@ struct SearchView: View {
     // MARK: - Results
 
     private var results: some View {
-        VStack(alignment: .leading, spacing: rem(0.75)) {
-            Text(model.results.isEmpty
-                 ? (model.query.count < 2 ? "Type to search" : (model.isSearching ? "Searching…" : "No results"))
-                 : "Results")
-                .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
+        let rows = model.rows
+        let step = Theme.Metrics.cardWidth(viewport, hero: false) + Theme.Metrics.cardGutter(viewport)
 
-            // A single horizontal row, parked like a shelf, so search results
-            // behave the same way as every other row in the app.
-            let step = Theme.Metrics.cardWidth(viewport, hero: false) + Theme.Metrics.cardGutter(viewport)
-            let parked = parkedIndex
+        return VStack(alignment: .leading, spacing: rem(1.25)) {
+            if rows.isEmpty {
+                Text(model.query.count < 2 ? "Type to search" : (model.isSearching ? "Searching…" : "No results"))
+                    .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+            }
 
-            HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
-                ForEach(Array(model.results.prefix(parked + 8).enumerated()), id: \.element.id) { index, video in
-                    VideoCard(video: video,
-                              isFocused: model.focus == .result(index),
-                              isHero: false)
+            // Rows parked like shelves, so search results behave the same way
+            // as every other row in the app.
+            ForEach(Array(rows.enumerated()), id: \.element.id) { rowIndex, row in
+                let parked = parkedIndex(row: rowIndex)
+                VStack(alignment: .leading, spacing: rem(0.75)) {
+                    Text(row.title)
+                        .font(.system(size: Theme.Metrics.shelfHeaderSize(viewport), weight: .medium))
+                        .foregroundStyle(focusedRow == rowIndex ? Theme.textPrimary : Theme.textTertiary)
+                    HStack(alignment: .top, spacing: Theme.Metrics.cardGutter(viewport)) {
+                        ForEach(Array(row.videos.prefix(parked + 8).enumerated()), id: \.element.id) { index, video in
+                            VideoCard(video: video,
+                                      isFocused: model.focus == .result(row: rowIndex, index: index),
+                                      isHero: false)
+                        }
+                    }
+                    .offset(x: -CGFloat(parked) * step)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(Theme.travel, value: parked)
                 }
             }
-            .offset(x: -CGFloat(parked) * step)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .mask(Rectangle().padding(.vertical, -viewport.height))
-            .animation(Theme.travel, value: parked)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        // The focused row parks at the top, the same rule as the shelves.
+        .offset(y: -CGFloat(focusedRow) * rowPitch)
+        .animation(Theme.travel, value: focusedRow)
+        .mask(Rectangle().padding(.vertical, -viewport.height))
     }
 
-    private var parkedIndex: Int {
-        if case let .result(index) = model.focus { return index }
+    private var focusedRow: Int {
+        if case let .result(row, _) = model.focus { return row }
         return 0
+    }
+
+    private func parkedIndex(row: Int) -> Int {
+        if case let .result(focusedRow, index) = model.focus, focusedRow == row { return index }
+        return 0
+    }
+
+    /// Header, card, metadata and the gap to the next row.
+    private var rowPitch: CGFloat {
+        Theme.Metrics.shelfHeaderSize(viewport) + rem(0.75)
+            + Theme.Metrics.cardWidth(viewport, hero: false) / Theme.Metrics.cardAspect
+            + Theme.Metrics.thumbToMeta(viewport)
+            + Theme.Metrics.metaBlockHeight(viewport)
+            + rem(1.25)
     }
 }

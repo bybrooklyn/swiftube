@@ -2,7 +2,9 @@ import SwiftUI
 
 struct RootView: View {
 
-    @State private var model = AppModel()
+    /// Owned by the App, not here: the menu-bar controller and the ⌘K
+    /// command need the same model.
+    let model: AppModel
 
     var body: some View {
         // One GeometryReader at the root publishes the viewport size; every

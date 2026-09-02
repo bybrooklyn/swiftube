@@ -227,7 +227,7 @@ final class PlayerModel {
                 withAnimation(Theme.travel) { descriptionScroll = max(0, scroll - 1) }
             case .move(.down):
                 withAnimation(Theme.travel) { descriptionScroll = scroll + 1 }
-            case .move(.left), .move(.right), .select:
+            case .move(.left), .move(.right), .select, .text:
                 break
             case .back, .menu:
                 closeDescription()
@@ -247,6 +247,7 @@ final class PlayerModel {
             case .back, .menu:         closeMenu()
             case .playPause:           playback.togglePlayPause()
             case let .seek(direction): seek(direction)
+            case .text:                break
             }
             showControls()
             return
@@ -256,6 +257,7 @@ final class PlayerModel {
             switch intent {
             case let .move(direction): composer.move(direction)
             case .select:              if composer.select() { postComment(composer.text) }
+            case let .text(text):      composer.type(text)
             case .back, .menu:         closeComposer()
             case .playPause:           playback.togglePlayPause()
             case let .seek(direction): seek(direction)
@@ -272,7 +274,7 @@ final class PlayerModel {
                 if index + 1 < comments.count { withAnimation(Theme.stateChange) { commentIndex = index + 1 } }
             case .select:
                 openComposer()
-            case .move(.left), .move(.right):
+            case .move(.left), .move(.right), .text:
                 break
             case .back, .menu:
                 closeComments()
@@ -308,6 +310,8 @@ final class PlayerModel {
             case .menu:
                 closeUpNext()
                 openMenu()
+            case .text:
+                break
             }
             showControls()
             return
@@ -357,6 +361,9 @@ final class PlayerModel {
 
         case .menu:
             openMenu()
+
+        case .text:
+            break
         }
     }
 
