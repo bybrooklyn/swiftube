@@ -73,7 +73,7 @@ struct RootView: View {
                 GlassHost {
                     if let cardMenu = model.cardMenu {
                         CardMenuView(model: cardMenu, onBack: { model.closeCardMenu() })
-                            .transition(.opacity)
+                            .transition(Theme.panelTransition)
                     }
                     if model.isConfirmingSignOut {
                         ConfirmDialog(

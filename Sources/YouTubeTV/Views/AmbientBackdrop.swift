@@ -16,7 +16,9 @@ struct AmbientBackdrop: View {
     @State private var color: Color = Theme.canvas
 
     var body: some View {
-        RadialGradient(colors: [color.opacity(0.5), Theme.canvas],
+        // Quiet on purpose: a tint the shelves sit in, not a light show. The
+        // content should lead; the wash is what the glass has to refract.
+        RadialGradient(colors: [color.opacity(0.38), Theme.canvas],
                        center: .init(x: 0.35, y: 0.35),
                        startRadius: 0,
                        endRadius: viewport.width * 0.8)
